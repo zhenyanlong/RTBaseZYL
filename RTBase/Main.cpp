@@ -11,7 +11,7 @@ void runTests()
 {
 	// Add test code here
 	// Example for ray-plane intersection test:
-	Ray ray(Vec3(0, 0, 0), Vec3(0, 0, 1));
+	/*Ray ray(Vec3(0, 0, 0), Vec3(0, 0, 1));
 	Plane plane;
 	Vec3 planeNormal(0, 0, 1);
 	plane.init(planeNormal, -5);
@@ -19,6 +19,24 @@ void runTests()
 	if (plane.rayIntersect(ray, t))
 	{
 		std::cout << "Intersection at t = " << t << std::endl;
+	}
+	else
+	{
+		std::cout << "No intersection" << std::endl;
+	}*/
+	// Example for ray-triangle intersection test:
+	Vertex v0, v1, v2;
+	v0.p = Vec3(0, 0, 1);
+	v1.p = Vec3(1, 0, 0);
+	v2.p = Vec3(0, 1, 0);
+	Triangle triangle;
+	triangle.init(v0, v1, v2, 0);
+	Ray ray(Vec3(0, 0, 0), Vec3(1, 1, 1));
+	float t, u, v;
+	if (triangle.rayIntersect(ray, t, u, v))
+	{
+		std::cout << "Intersection at t = " << t << ", u = " << u << ", v = " << v << std::endl;
+
 	}
 	else
 	{

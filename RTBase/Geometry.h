@@ -69,8 +69,8 @@ public:
 		vertices[0] = v0;
 		vertices[1] = v1;
 		vertices[2] = v2;
-		e1 = vertices[2].p - vertices[1].p;
-		e2 = vertices[0].p - vertices[2].p;
+		e1 = vertices[1].p - vertices[0].p;
+		e2 = vertices[2].p - vertices[0].p;
 		n = e1.cross(e2).normalize();
 		area = e1.cross(e2).length() * 0.5f;
 		d = Dot(n, vertices[0].p);
@@ -82,6 +82,53 @@ public:
 	// Add code here
 	bool rayIntersect(const Ray& r, float& t, float& u, float& v) const
 	{
+		/*Plane plane;
+		Vec3 planeNormal = n;
+		plane.init(planeNormal, -d);
+		
+		if (plane.rayIntersect(const_cast<Ray&>(r), t))
+		{
+			Vec3 P = r.at(t);
+			Vec3 q1 = P - vertices[0].p;
+			Vec3 C1 = e1.cross(q1);
+			float invA = 1.0/ Dot((e1.cross(e2)), n);
+			float alpha = Dot(C1, n) * invA;
+
+			Vec3 q2 = P - vertices[1].p;
+			Vec3 C2 = e2.cross(q2);
+			float beta = Dot(C2, n) * invA;
+
+			u = alpha;
+			v = beta;
+
+			if (alpha >= 0 && beta >= 0 && (alpha + beta) <= 1)
+			{
+				return true;
+				
+			}
+			 
+		}
+		return false;*/
+
+		// Moller-Trumbore
+		Vec3 p = r.dir.cross(e2);
+		float det = e1.dot(p);
+		
+		if (abs(det)<EPSILON)
+		{
+			return false;
+		}
+		Vec3 T = r.o - vertices[0].p;
+		float beta = (T.dot(p)) / det;
+		u = beta;
+		
+		if (beta < 0 || beta > 1) return false;
+		Vec3 q = T.cross(e1);
+		float gamma = (r.dir.dot(q)) / det;
+		v = gamma;
+		if (gamma < 0 || gamma>1 || (beta + gamma) > 1) return false;
+		t = (e2.dot(q)) / det;
+		if (t < 0) return false;
 		return true;
 	}
 	void interpolateAttributes(const float alpha, const float beta, const float gamma, Vec3& interpolatedNormal, float& interpolatedU, float& interpolatedV) const
@@ -124,12 +171,25 @@ public:
 	// Add code here
 	bool rayAABB(const Ray& r, float& t)
 	{
-		return true;
+		Vec3 tmin = (min - r.o) * r.invDir;
+		Vec3 tmax = (max - r.o) * r.invDir;
+		Vec3 Tentry = Min(tmin, tmax);
+		Vec3 Texit = Max(tmin, tmax);
+		float tentry = std::max(std::max(Tentry.x, Tentry.y), Tentry.z);
+		float texit = std::min(std::min(Texit.x, Texit.y), Texit.z);
+		t = std::min(tentry, texit);
+		return (tentry <= texit&&texit >= 0);
 	}
 	// Add code here
 	bool rayAABB(const Ray& r)
 	{
-		return true;
+		Vec3 tmin = (min - r.o) * r.invDir;
+		Vec3 tmax = (max - r.o) * r.invDir;
+		Vec3 Tentry = Min(tmin, tmax);
+		Vec3 Texit = Max(tmin, tmax);
+		float tentry = std::max(std::max(Tentry.x, Tentry.y), Tentry.z);
+		float texit = std::min(std::min(Texit.x, Texit.y), Texit.z);
+		return (tentry <= texit && texit >= 0);
 	}
 	// Add code here
 	float area()
@@ -152,6 +212,7 @@ public:
 	// Add code here
 	bool rayIntersect(Ray& r, float& t)
 	{
+
 		return false;
 	}
 };
