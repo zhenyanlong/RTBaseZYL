@@ -2,6 +2,7 @@
 
 #include "Core.h"
 #include "Sampling.h"
+#include "DebugHelper.h"
 
 class Ray
 {
@@ -212,8 +213,19 @@ public:
 	// Add code here
 	bool rayIntersect(Ray& r, float& t)
 	{
+		// ray - sphere求交
 
-		return false;
+		Vec3 L = centre - r.o;
+		float tca = L.dot(r.dir);
+		if (tca < 0) return false;
+		float d2 = L.dot(L) - tca * tca;
+		if (d2 > radius * radius) return false;
+		float thc = sqrt(radius * radius - d2);
+		t = tca - thc;
+		float t1 = tca + thc;
+		if (t < 0) t = t1;
+		if (t < 0) return false;
+		return true ;
 	}
 };
 
@@ -231,6 +243,19 @@ struct IntersectionData
 #define TRIANGLE_COST 2.0f
 #define BUILD_BINS 32
 
+struct Bin
+{
+	AABB bounds;
+	unsigned int count;
+	Bin() : count(0) {}
+
+	void reset()
+	{
+		bounds.reset();
+		count = 0;
+	}
+};
+
 class BVHNode
 {
 public:
@@ -241,19 +266,218 @@ public:
 	// But you can store this however you want!
 	// unsigned int offset;
 	// unsigned char num;
+	std::vector<unsigned int> triangleIndices;
+
+	bool isLeaf()
+	{
+		return (r == NULL && l == NULL);
+	}
+
 	BVHNode()
 	{
 		r = NULL;
 		l = NULL;
 	}
 	// Note there are several options for how to implement the build method. Update this as required
-	void build(std::vector<Triangle>& inputTriangles)
+	void subdivide(std::vector<Triangle>& inputTriangles, std::vector<Triangle>& outputTriangles,std::vector<unsigned int>& indices)
 	{
 		// Add BVH building code here
+		// The count of triangles is less than MAXNODE_TRIANGLES, create a leaf node
+		if (indices.size() <= MAXNODE_TRIANGLES)
+		{
+			for (int i = 0; i < indices.size(); i++)
+			{
+				triangleIndices.push_back(indices[i]);
+				outputTriangles.push_back(inputTriangles[indices[i]]);
+			}
+			return;
+		}
+		// find best split in three axises using SAH
+		int bestAxis = -1;
+		int bestBin = -1;
+		float bestCost = FLT_MAX;
+		float parentArea = bounds.area();
+
+		for (int axis = 0; axis < 3; axis++)
+		{
+			float minBound = (axis == 0) ? bounds.min.x : (axis == 1) ? bounds.min.y : bounds.min.z;
+			float maxBound = (axis == 0) ? bounds.max.x : (axis == 1) ? bounds.max.y : bounds.max.z;
+			
+			if (minBound == maxBound) continue; 
+
+			Bin bins[BUILD_BINS];
+			float binSize = (maxBound - minBound) / BUILD_BINS;
+			// assign triangles to bins
+			for (unsigned int index : indices)
+			{
+				Vec3 centre = inputTriangles[index].centre();
+				int binIndex = std::min((int)((((axis == 0) ? centre.x : (axis == 1) ? centre.y : centre.z) - minBound) / binSize), BUILD_BINS - 1);
+				bins[binIndex].count++;
+				bins[binIndex].bounds.extend(inputTriangles[index].vertices[0].p);
+				bins[binIndex].bounds.extend(inputTriangles[index].vertices[1].p);
+				bins[binIndex].bounds.extend(inputTriangles[index].vertices[2].p);
+			}
+			// evaluate split cost
+			Bin leftBins[BUILD_BINS];
+			Bin rightBins[BUILD_BINS];
+			// prefix sum
+			leftBins[0] = bins[0];
+			for (int i = 1; i < BUILD_BINS; i++)
+			{
+				leftBins[i].bounds = leftBins[i - 1].bounds;
+				leftBins[i].count = leftBins[i - 1].count;
+				leftBins[i].bounds.extend(bins[i].bounds.min);
+				leftBins[i].bounds.extend(bins[i].bounds.max);	
+				leftBins[i].count += bins[i].count;
+			}
+			// suffix sum
+			rightBins[BUILD_BINS - 1] = bins[BUILD_BINS - 1];
+			for (int i = BUILD_BINS - 2; i >= 0; i--)
+			{
+				rightBins[i].bounds = rightBins[i + 1].bounds;
+				rightBins[i].count = rightBins[i + 1].count;
+				rightBins[i].bounds.extend(bins[i].bounds.min);
+				rightBins[i].bounds.extend(bins[i].bounds.max);
+				rightBins[i].count += bins[i].count;
+			}
+			// find best split in this axis
+			for (int i = 1; i < BUILD_BINS; i++)
+			{
+				unsigned int lCount = leftBins[i - 1].count;
+				unsigned int rCount = rightBins[i].count;
+
+				float lArea = leftBins[i - 1].bounds.area();
+				float rArea = rightBins[i].bounds.area();
+				float cost = (lArea / parentArea) * lCount * TRIANGLE_COST + (rArea / parentArea) * rCount * TRIANGLE_COST + TRAVERSE_COST;
+				if (cost < bestCost)
+				{
+					bestCost = cost;
+					bestAxis = axis;
+					bestBin = i;
+				}
+			}
+			
+		}
+		// using SAH to best split
+		float leafCost = indices.size() * TRIANGLE_COST;
+		if (bestAxis == -1 || leafCost < bestCost)
+		{
+			for (int i = 0; i < indices.size(); i++)
+			{
+				triangleIndices.push_back(indices[i]);
+				outputTriangles.push_back(inputTriangles[indices[i]]);
+			}
+			return;
+		}
+		float minBound = (bestAxis == 0) ? bounds.min.x : (bestAxis == 1) ? bounds.min.y : bounds.min.z;
+		float maxBound = (bestAxis == 0) ? bounds.max.x : (bestAxis == 1) ? bounds.max.y : bounds.max.z;
+		float splitPos = minBound + (bestBin * ((maxBound - minBound) / BUILD_BINS));
+
+		std::vector<unsigned int> leftIndices, rightIndices;
+		for (unsigned int index : indices)
+		{
+			Vec3 centre = inputTriangles[index].centre();
+			if (((bestAxis == 0) ? centre.x : (bestAxis == 1) ? centre.y : centre.z) < splitPos)
+			{
+				leftIndices.push_back(index);
+			}
+			else
+			{
+				rightIndices.push_back(index);
+			}
+		}
+		// if one side is empty, split equally
+		if (leftIndices.empty() || rightIndices.empty())
+		{
+			for (unsigned int idx : indices)
+			{
+				triangleIndices.push_back((unsigned int)outputTriangles.size());
+				outputTriangles.push_back(inputTriangles[idx]);
+			}
+			return;
+		}
+		// create child left/right nodes
+		// left
+		l = new BVHNode();
+		l->bounds.reset();
+		for (unsigned int index : leftIndices)
+		{
+			l->bounds.extend(inputTriangles[index].vertices[0].p);
+			l->bounds.extend(inputTriangles[index].vertices[1].p);
+			l->bounds.extend(inputTriangles[index].vertices[2].p);
+		}
+		l->subdivide(inputTriangles, outputTriangles, leftIndices);
+		// right
+		r = new BVHNode();
+		r->bounds.reset();
+		for (unsigned int index : rightIndices)
+		{
+			r->bounds.extend(inputTriangles[index].vertices[0].p);
+			r->bounds.extend(inputTriangles[index].vertices[1].p);
+			r->bounds.extend(inputTriangles[index].vertices[2].p);
+		}
+		r->subdivide(inputTriangles, outputTriangles, rightIndices);
+	}
+	
+	void build(std::vector<Triangle>& inputTriangles, std::vector<Triangle>& outputTriangles)
+	{
+		// Add BVH building code here
+		bounds.reset();
+		for (int i = 0; i < inputTriangles.size(); i++)
+		{
+			bounds.extend(inputTriangles[i].vertices[0].p);
+			bounds.extend(inputTriangles[i].vertices[1].p);
+			bounds.extend(inputTriangles[i].vertices[2].p);
+		}
+		std::vector<unsigned int> indices(inputTriangles.size());
+		for (unsigned int i = 0; i < inputTriangles.size(); i++)
+		{
+			indices[i] = i;
+		}
+
+		subdivide(inputTriangles, outputTriangles, indices);
+		
+		
 	}
 	void traverse(const Ray& ray, const std::vector<Triangle>& triangles, IntersectionData& intersection)
 	{
 		// Add BVH Traversal code here
+		float tBox;
+		if (!bounds.rayAABB(ray, tBox) || tBox > intersection.t) return;
+		if (isLeaf())
+		{
+			for (unsigned int index : triangleIndices)
+			{
+				float t, u, v;
+				if (triangles[index].rayIntersect(ray, t, u, v))
+				{
+					if (t < intersection.t)
+					{
+						intersection.t = t;
+						intersection.ID = index;
+						intersection.alpha = u;
+						intersection.beta = v;
+						intersection.gamma = 1.0f - (u + v);
+					}
+				}
+			}
+			return;
+		}
+		// non leaf node, traverse child nodes
+		float tLeft, tRight;
+		bool hitLeft = (l!=NULL)&&l->bounds.rayAABB(ray, tLeft);
+		bool hitRight = (r!=NULL)&&r->bounds.rayAABB(ray, tRight);
+		if (hitLeft && hitRight)
+		{
+			// traverse closer child first
+			BVHNode* first = (tLeft < tRight) ? l : r;
+			BVHNode* second = (first == l) ? r : l;
+			first->traverse(ray, triangles, intersection);
+			second->traverse(ray, triangles, intersection);
+		}else if (hitLeft) l->traverse(ray, triangles, intersection);
+		else if (hitRight) r->traverse(ray, triangles, intersection);
+		// if no hit, return
+		return;
 	}
 	IntersectionData traverse(const Ray& ray, const std::vector<Triangle>& triangles)
 	{
@@ -265,6 +489,27 @@ public:
 	bool traverseVisible(const Ray& ray, const std::vector<Triangle>& triangles, const float maxT)
 	{
 		// Add visibility code here
+		float tBox;
+		// if ray misses the box or the intersection is farther than maxT, return true
+		if (!bounds.rayAABB(ray, tBox) || tBox > maxT) return true;
+		if (isLeaf())
+		{
+			for (unsigned int index : triangleIndices)
+			{
+				float t, u, v;
+				if (triangles[index].rayIntersect(ray, t, u, v))
+				{
+					if (t < maxT)
+					{
+						return false;
+					}
+				}
+			}
+			return true;
+		}
+		// non leaf node, traverse child nodes
+		if (l!=NULL && !l->traverseVisible(ray, triangles, maxT)) return false;
+		if (r!=NULL && !r->traverseVisible(ray, triangles, maxT)) return false;
 		return true;
 	}
 };

@@ -152,6 +152,77 @@ public:
 	}
 };
 
+class GassianFilter : public ImageFilter
+{
+	float sizef = 2.0f;
+	float alpha = 2.0f;
+
+public:
+	virtual float filter(float x, float y) const override
+	{
+		if (fabsf(x) > sizef && fabs(y) > sizef)
+		{
+			return 0.0f;
+		}
+		float d2 = (x * x) + (y * y);
+		return std::exp(-alpha * d2) - std::exp(-alpha * sizef * sizef);
+	}
+
+	virtual int size() const override
+	{
+		return static_cast<int>(std::ceil(sizef));
+	}
+};
+
+class MitchellFilter : public ImageFilter
+{
+	float B;
+	float C;
+
+	float p3, p2, p0; // pre-compute for |x|<1
+	float q3, q2, q1, q0; // pre-compute for 1<=|x|<2
+public:
+	MitchellFilter(float _B = 1.0f / 3.0f, float _C = 1.0f / 3.0f)
+	{
+		B = _B;
+		C = _C;
+
+		p3 = (12.0f - 9.0f * B - 6.0f * C);
+		p2 = (-18.0f + 12.0f * B + 6.0f * C);
+		p0 = (6.0f - 2.0f * B);
+		
+		
+		q3 = (-B - 6.0f * C);
+		q2 = (6.0f * B + 30.0f * C);
+		q1 = (-12.0f * B - 48.0f * C);
+		q0 = (8.0f * B + 24.0f * C);
+
+	}
+
+	float Mitchell1D(float x) const
+	{
+		float ax = std::abs(x);
+		if (ax < 1.0f)
+		{
+			return (p3 * ax * ax * ax + p2 * ax * ax + p0) / 6.0f;
+		}
+		else if (ax < 2.0f)
+		{
+			return (q3 * ax * ax * ax + q2 * ax * ax + q1 * ax + q0) / 6.0f;
+		}
+		return 0.0f;
+	}
+
+	virtual float filter(float x, float y) const override
+	{
+		return Mitchell1D(x) * Mitchell1D(y);
+	}
+	virtual int size() const override
+	{
+		return 2;
+	}
+};
+
 class Film
 {
 public:
@@ -163,10 +234,71 @@ public:
 	void splat(const float x, const float y, const Colour& L)
 	{
 		// Code to splat a smaple with colour L into the image plane using an ImageFilter
+		float filterWeights[25]; // Storage to cache weights
+		unsigned int indices[25]; // Store indices to minimize computations
+		unsigned int used = 0;
+		float total = 0;
+		int size = filter->size();
+		for (int i = -size; i <= size; i++) {
+			for (int j = -size; j <= size; j++) {
+				int px = (int)x + j;
+				int py = (int)y + i;
+				if (px >= 0 && px < width && py >= 0 && py < height) {
+					indices[used] = (py * width) + px;
+					filterWeights[used] = filter->filter(px - x, py - y);
+					total += filterWeights[used];
+					used++;
+				}
+			}
+		}
+		for (int i = 0; i < used; i++) {
+			film[indices[i]] = film[indices[i]] + (L * filterWeights[i] / total);
+		}
 	}
 	void tonemap(int x, int y, unsigned char& r, unsigned char& g, unsigned char& b, float exposure = 1.0f)
 	{
 		// Return a tonemapped pixel at coordinates x, y
+		// Lout= (Lin * 2^e)/(1/2.2)
+		/*Colour c = film[y * width + x];
+		if (SPP > 0) {
+			c = c / (float)SPP;
+		}
+		float factor2e = std::pow(2.0f, exposure);
+		float invGamma = 1.0f / 2.2f;
+		r = (unsigned char)std::max(std::min((std::pow(c.r * factor2e, invGamma) * 255.0f),255.0f),0.0f);
+		g = (unsigned char)std::max(std::min((std::pow(c.g * factor2e, invGamma) * 255.0f), 255.0f), 0.0f);
+		b = (unsigned char)std::max(std::min((std::pow(c.b * factor2e, invGamma) * 255.0f), 255.0f), 0.0f);*/
+		
+		Colour c = film[y * width + x];
+		if (SPP > 0) {
+			c = c / (float)SPP;
+		}
+
+		//L_exposed = L_in * 2^exposure
+		float expScale = pow(2.0f, exposure);
+		float rr = c.r * expScale;
+		float gg = c.g * expScale;
+		float bb = c.b * expScale;
+
+		// L_out = (L_exposed)^(1/2.2)
+		float invGamma = 1.0f / 2.2f;
+		rr = pow(rr, invGamma);
+		gg = pow(gg, invGamma);
+		bb = pow(bb, invGamma);
+
+		
+		auto toByte = [](float val) {
+			float v = val * 255.0f;
+			if (v < 0.0f) return (unsigned char)0;
+			if (v > 255.0f) return (unsigned char)255;
+			return (unsigned char)v;
+			};
+
+		r = toByte(rr);
+		g = toByte(gg);
+		b = toByte(bb);
+
+
 	}
 	// Do not change any code below this line
 	void init(int _width, int _height, ImageFilter* _filter)
