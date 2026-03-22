@@ -443,7 +443,7 @@ public:
 	{
 		// Add BVH Traversal code here
 		float tBox;
-		if (!bounds.rayAABB(ray, tBox) || tBox > intersection.t) return;
+		if (!bounds.rayAABB(ray, tBox) ) return;
 		if (isLeaf())
 		{
 			for (unsigned int index : triangleIndices)
@@ -508,8 +508,20 @@ public:
 			return true;
 		}
 		// non leaf node, traverse child nodes
-		if (l!=NULL && !l->traverseVisible(ray, triangles, maxT)) return false;
-		if (r!=NULL && !r->traverseVisible(ray, triangles, maxT)) return false;
+		float tLeft, tRight;
+		bool hitLeft = (l != NULL) && l->bounds.rayAABB(ray, tLeft);
+		bool hitRight = (r != NULL) && r->bounds.rayAABB(ray, tRight);
+		if (hitLeft && hitRight)
+		{
+			// traverse closer child first
+			BVHNode* first = (tLeft < tRight) ? l : r;
+			BVHNode* second = (first == l) ? r : l;
+			if (!first->traverseVisible(ray, triangles, maxT)) return false;
+			if (!second->traverseVisible(ray, triangles, maxT)) return false;
+		}
+		 else if (hitLeft && !l->traverseVisible(ray, triangles, maxT)) return false;
+		 else if (hitRight && !r->traverseVisible(ray, triangles, maxT)) return false;
+		
 		return true;
 	}
 };

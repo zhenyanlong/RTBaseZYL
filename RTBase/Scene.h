@@ -107,7 +107,7 @@ public:
 	}
 	IntersectionData traverse(const Ray& ray)
 	{
-		IntersectionData intersection;
+		/*IntersectionData intersection;
 		intersection.t = FLT_MAX;
 		for (int i = 0; i < triangles.size(); i++)
 		{
@@ -125,7 +125,7 @@ public:
 					intersection.gamma = 1.0f - (u + v);
 				}
 			}
-		}
+		}*/
 		// return intersection;
 		return bvh->traverse(ray, triangles);
 	}
