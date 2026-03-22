@@ -12,16 +12,22 @@ public:
 	Vec3 to;
 	Vec3 up;
 	Camera* camera = NULL;
-	float movespeed = 1.0f;
-	float rotspeed = 5.0f;
+	float movespeed = 100.0f;
+	float rotspeed = 500.0f;
+	float deltatime = 0.1f;
 	RTCamera()
 	{
-		rotspeed = 5.0f;
+		rotspeed = 50.0f;
+	}
+
+	void updateTime(float dt)
+	{
+		deltatime = dt;
 	}
 	void forward()
 	{
 		Vec3 dir = to - from;
-		dir = dir.normalize() * movespeed;
+		dir = dir.normalize() * movespeed * deltatime*10;
 		from = from + dir;
 		to = from + dir;
 		updateCamera();
@@ -29,7 +35,7 @@ public:
 	void back()
 	{
 		Vec3 dir = to - from;
-		dir = dir.normalize() * movespeed;
+		dir = dir.normalize() * movespeed * deltatime*10;
 		from = from - dir;
 		to = from + dir;
 		updateCamera();
@@ -39,7 +45,7 @@ public:
 		Vec3 dir = to - from;
 		dir = dir.normalize();
 
-		float rad = rotspeed * (M_PI / 180.0f);
+		float rad = rotspeed * (M_PI / 180.0f) * deltatime;
 		float cosTheta = cosf(rad);
 		float sinTheta = sinf(rad);
 		Vec3 k = up;
@@ -54,7 +60,7 @@ public:
 	{
 		Vec3 dir = to - from;
 		dir = dir.normalize();
-		float rad = -rotspeed * (M_PI / 180.0f);
+		float rad = -rotspeed * (M_PI / 180.0f) * deltatime;
 		float cosTheta = cosf(rad);
 		float sinTheta = sinf(rad);
 		Vec3 k = up;
@@ -67,14 +73,14 @@ public:
 	}
 	void flyUp()
 	{
-		Vec3 dir = up * movespeed;
+		Vec3 dir = up * movespeed * deltatime*10;
 		from = from + dir;
 		to = to + dir;
 		updateCamera();
 	}
 	void flyDown()
 	{
-		Vec3 dir = up * movespeed;
+		Vec3 dir = up * movespeed * deltatime*10;
 		from = from - dir;
 		to = to - dir;
 		updateCamera();

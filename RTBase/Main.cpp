@@ -47,7 +47,7 @@ void runTests()
 int main(int argc, char *argv[])
 {
 	// Add call to tests if required
-	runTests();
+	// runTests();
 	
 	// Initialize default parameters
 	std::string sceneName = "cornell-box";
@@ -139,8 +139,10 @@ int main(int argc, char *argv[])
 		}
 		// Time how long a render call takes
 		timer.reset();
+		
 		rt.render();
 		float t = timer.dt();
+		viewcamera.updateTime(t);
 		// Write
 		std::cout << t << std::endl;
 		if (canvas.keyPressed('P'))

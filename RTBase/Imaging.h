@@ -140,7 +140,7 @@ class BoxFilter : public ImageFilter
 public:
 	float filter(float x, float y) const
 	{
-		if (fabsf(x) < 0.5f && fabs(y) < 0.5f)
+		if (fabsf(x) <= 0.5f && fabs(y) <= 0.5f)
 		{
 			return 1.0f;
 		}
@@ -251,6 +251,7 @@ public:
 				}
 			}
 		}
+		if (total == 0) return;
 		for (int i = 0; i < used; i++) {
 			film[indices[i]] = film[indices[i]] + (L * filterWeights[i] / total);
 		}

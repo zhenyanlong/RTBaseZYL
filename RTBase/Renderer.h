@@ -10,6 +10,47 @@
 #include "GamesEngineeringBase.h"
 #include <thread>
 #include <functional>
+#include <mutex>
+
+class Tile
+{
+	int tilex, tiley;
+	int width, height;
+public:
+		Tile(int _x, int _y, int _width = 128, int _height = 128) : tilex(_x), tiley(_y), width(_width), height(_height) {}
+
+		int GetTileX() const { return tilex; }
+		int GetTileY() const { return tiley; }
+		int GetTileWidth() const { return width; }
+		int GetTileHeight() const { return height; }
+
+		void GetTileOriPos(int& x, int& y) const
+		{
+			x = tilex * width;
+			y = tiley * height;
+		}
+
+		void ConvertLocalPosToGlobal(int localX, int localY, int& globalX, int& globalY) const
+		{
+			globalX = tilex * width + localX;
+			globalY = tiley * height + localY;
+		}
+
+		static void SplitIntoTiles(int imageWidth, int imageHeight, int tileWidth, int tileHeight, std::vector<Tile>& tiles)
+		{
+			for (int y = 0; y < imageHeight; y += tileHeight)
+			{
+				for (int x = 0; x < imageWidth; x += tileWidth)
+				{
+					int currentTileWidth = std::min(tileWidth, imageWidth - x);
+					int currentTileHeight = std::min(tileHeight, imageHeight - y);
+					tiles.emplace_back(x / tileWidth, y / tileHeight, currentTileWidth, currentTileHeight);
+				}
+			}
+		}
+
+		
+};
 
 class RayTracer
 {
@@ -20,12 +61,13 @@ public:
 	MTRandom *samplers;
 	std::thread **threads;
 	int numProcs;
+	std::mutex filmMutex;
 	void init(Scene* _scene, GamesEngineeringBase::Window* _canvas)
 	{
 		scene = _scene;
 		canvas = _canvas;
 		film = new Film();
-		film->init((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, new MitchellFilter());
+		film->init((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, new BoxFilter());
 		SYSTEM_INFO sysInfo;
 		GetSystemInfo(&sysInfo);
 		numProcs = sysInfo.dwNumberOfProcessors;
@@ -84,29 +126,75 @@ public:
 	void render()
 	{
 		film->incrementSPP();
-		for (unsigned int y = 0; y < film->height; y++)
-		{
-			for (unsigned int x = 0; x < film->width; x++)
-			{
-				float px = x + 0.5f;
-				float py = y + 0.5f;
-				Ray ray = scene->camera.generateRay(px, py);
-				
-				Colour col = viewNormals(ray);
-				//Colour col = albedo(ray);
-				film->splat(px, py, col);
-				/*unsigned char r = (unsigned char)(col.r * 255);
-				unsigned char g = (unsigned char)(col.g * 255);
-				unsigned char b = (unsigned char)(col.b * 255);*/
-				//film->splat(px, py, col);
-				unsigned char r;
-				unsigned char g;
-				unsigned char b;
-				film->tonemap(x, y, r, g, b);
+		// tile-based rendering
+		// generate tiles
+		std::vector<Tile> tiles;
+		Tile::SplitIntoTiles(film->width, film->height, 128, 128, tiles);
 
-				canvas->draw(x, y, r, g, b);
+		std::atomic<int> nextTile(0);
+		int totalTiles = tiles.size();
+
+		auto TileRenderFunction = [this, &nextTile, &tiles, totalTiles](int threadId) {
+			while (true) {
+				int tileIndex = nextTile.fetch_add(1);
+				if (tileIndex >= totalTiles) break;
+				const Tile& tile = tiles[tileIndex];
+				
+				for (unsigned int y = 0; y < tile.GetTileHeight(); y++)
+				{
+					for (unsigned int x = 0; x < tile.GetTileWidth(); x++)
+					{
+						int globalX, globalY;
+						tile.ConvertLocalPosToGlobal(x, y, globalX, globalY);
+						float px = globalX + 0.5f;
+						float py = globalY + 0.5f;
+						Ray ray = scene->camera.generateRay(px, py);
+						
+						// Colour col = viewNormals(ray);
+						Colour col = albedo(ray);
+						
+						film->splat(px, py, col);
+						unsigned char r;
+						unsigned char g;
+						unsigned char b;
+						film->tonemap(globalX, globalY, r, g, b);
+						canvas->draw(globalX, globalY, r, g, b);
+					}
+				}
 			}
+		};
+		for (int i = 0; i < numProcs; i++) {
+			threads[i] = new std::thread(TileRenderFunction, i);
 		}
+		for (int i = 0; i < numProcs; i++) {
+			threads[i]->join();
+			delete threads[i];
+			threads[i] = nullptr;
+		}
+		// single-threaded rendering
+		//for (unsigned int y = 0; y < film->height; y++)
+		//{
+		//	for (unsigned int x = 0; x < film->width; x++)
+		//	{
+		//		float px = x + 0.5f;
+		//		float py = y + 0.5f;
+		//		Ray ray = scene->camera.generateRay(px, py);
+		//		
+		//		Colour col = viewNormals(ray);
+		//		//Colour col = albedo(ray);
+		//		film->splat(px, py, col);
+		//		/*unsigned char r = (unsigned char)(col.r * 255);
+		//		unsigned char g = (unsigned char)(col.g * 255);
+		//		unsigned char b = (unsigned char)(col.b * 255);*/
+		//		//film->splat(px, py, col);
+		//		unsigned char r;
+		//		unsigned char g;
+		//		unsigned char b;
+		//		film->tonemap(x, y, r, g, b);
+
+		//		canvas->draw(x, y, r, g, b);
+		//	}
+		//}
 	}
 	int getSPP()
 	{
