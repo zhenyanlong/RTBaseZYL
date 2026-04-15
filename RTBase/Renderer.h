@@ -136,7 +136,7 @@ public:
 			
 		}
 		Colour L_direct = computeDirect(shadingData, sampler) * pathThroughput;
-		Colour L_indirect(0.0f, 0.0f, 0.0f);
+		
 		float rrProb = 0.9f;
 		if (depth >= 5)
 		{
@@ -155,15 +155,20 @@ public:
 
 		float r1 = sampler->next();
 		float r2 = sampler->next();
-		Vec3 local_wi = SamplingDistributions::cosineSampleHemisphere(r1, r2);
-		Vec3 world_wi = shadingData.frame.toWorld(local_wi);
-		float pdf = SamplingDistributions::cosineHemispherePDF(local_wi);
+		//Vec3 local_wi = SamplingDistributions::cosineSampleHemisphere(r1, r2);
+		
+
+		Colour L_indirect(0.0f, 0.0f, 0.0f);
+		Colour f;
+		float pdf;
+		Vec3 world_wi =shadingData.bsdf->sample(shadingData,sampler, f, pdf);
+		Vec3 local_wi = shadingData.frame.toLocal(world_wi);
 		float cosTheta = std::max(0.0f, local_wi.z);
 		if (pdf > 0.0f)
 		{
 			Ray newRay;
 			newRay.init(shadingData.x + (world_wi * EPSILON), world_wi);
-			Colour f = shadingData.bsdf->evaluate(shadingData, world_wi);
+			
 			pathThroughput = pathThroughput * f * cosTheta / pdf;
 			L_indirect = pathTrace(newRay, pathThroughput, depth + 1, sampler);
 			return L_emission + L_direct + L_indirect;

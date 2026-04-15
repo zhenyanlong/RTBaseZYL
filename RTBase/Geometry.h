@@ -298,7 +298,7 @@ public:
 		{
 			for (int i = 0; i < indices.size(); i++)
 			{
-				triangleIndices.push_back(indices[i]);
+				triangleIndices.push_back((unsigned int)outputTriangles.size());
 				outputTriangles.push_back(inputTriangles[indices[i]]);
 			}
 			return;
@@ -322,7 +322,7 @@ public:
 			for (unsigned int index : indices)
 			{
 				Vec3 centre = inputTriangles[index].centre();
-				int binIndex = std::min((int)((((axis == 0) ? centre.x : (axis == 1) ? centre.y : centre.z) - minBound) / binSize), BUILD_BINS - 1);
+				int binIndex = std::max(0, std::min((int)((((axis == 0) ? centre.x : (axis == 1) ? centre.y : centre.z) - minBound) / binSize), BUILD_BINS - 1));
 				bins[binIndex].count++;
 				bins[binIndex].bounds.extend(inputTriangles[index].vertices[0].p);
 				bins[binIndex].bounds.extend(inputTriangles[index].vertices[1].p);
@@ -375,7 +375,7 @@ public:
 		{
 			for (int i = 0; i < indices.size(); i++)
 			{
-				triangleIndices.push_back(indices[i]);
+				triangleIndices.push_back((unsigned int)outputTriangles.size());
 				outputTriangles.push_back(inputTriangles[indices[i]]);
 			}
 			return;
@@ -483,8 +483,10 @@ public:
 			// traverse closer child first
 			BVHNode* first = (tLeft < tRight) ? l : r;
 			BVHNode* second = (first == l) ? r : l;
+			float tSecond = (first == l) ? tRight : tLeft;
 			first->traverse(ray, triangles, intersection);
-			second->traverse(ray, triangles, intersection);
+			if (tSecond < intersection.t) 
+				second->traverse(ray, triangles, intersection);
 		}else if (hitLeft) l->traverse(ray, triangles, intersection);
 		else if (hitRight) r->traverse(ray, triangles, intersection);
 		// if no hit, return
