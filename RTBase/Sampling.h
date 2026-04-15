@@ -32,22 +32,34 @@ public:
 	static Vec3 uniformSampleHemisphere(float r1, float r2)
 	{
 		// Add code here
-		return Vec3(0, 0, 1);
+		float phi = 2.0f * M_PI * r1;
+		float theta = acosf(r2);
+		
+		return SphericalCoordinates::sphericalToWorld(theta, phi);
 	}
 	static float uniformHemispherePDF(const Vec3 wi)
 	{
 		// Add code here
-		return 1.0f;
+		if (wi.z > 0)
+		{
+			return M_1_PI / 2.f;
+		}
+		return 0.0f;
 	}
 	static Vec3 cosineSampleHemisphere(float r1, float r2)
 	{
 		// Add code here
-		return Vec3(0, 0, 1);
+		float phi = 2.0f * M_PI * r1;
+		float theta = acosf(sqrtf(r2));
+		return SphericalCoordinates::sphericalToWorld(theta, phi);
 	}
 	static float cosineHemispherePDF(const Vec3 wi)
 	{
 		// Add code here
-		return 1.0f;
+		
+		if (wi.z > 0)
+			return wi.z / M_PI;
+		return 0.0f;
 	}
 	static Vec3 uniformSampleSphere(float r1, float r2)
 	{

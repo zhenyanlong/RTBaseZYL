@@ -148,7 +148,7 @@ public:
 	}
 	int size() const
 	{
-		return 0;
+		return 1;
 	}
 };
 
@@ -256,6 +256,18 @@ public:
 			film[indices[i]] = film[indices[i]] + (L * filterWeights[i] / total);
 		}
 	}
+
+	float filmicFunc(float x)
+	{
+		float a = 0.15f;
+		float b = 0.50f;
+		float c = 0.10f;
+		float d = 0.20f;
+		float e = 0.02f;
+		float f = 0.30f;
+		return ((x * (a * x + c * b) + d * e) / (x * (a * x + b) + d * f)) - (e / f);
+	}
+
 	void tonemap(int x, int y, unsigned char& r, unsigned char& g, unsigned char& b, float exposure = 1.0f)
 	{
 		// Return a tonemapped pixel at coordinates x, y
@@ -274,24 +286,42 @@ public:
 		if (SPP > 0) {
 			c = c / (float)SPP;
 		}
+		// Apply filmic tonemapping curve
+		c.r = filmicFunc(c.r);
+		c.g = filmicFunc(c.g);
+		c.b = filmicFunc(c.b);
+		const float W = 11.2f; 
+		float denom = 1.0f / filmicFunc(W);
+		c.r = c.r * denom;
+		c.g = c.g * denom;
+		c.b = c.b * denom;
 
-		//L_exposed = L_in * 2^exposure
-		float expScale = pow(2.0f, exposure);
-		float rr = c.r * expScale;
-		float gg = c.g * expScale;
-		float bb = c.b * expScale;
+		//c.r = std::max(0.0f, std::min(1.0f, c.r));
+		//c.g = std::max(0.0f, std::min(1.0f, c.g));
+		//c.b = std::max(0.0f, std::min(1.0f, c.b));
 
-		// L_out = (L_exposed)^(1/2.2)
+		float rr = c.r;
+		float gg = c.g;
+		float bb = c.b;
+
+		////L_exposed = L_in * 2^exposure
+		//float expScale = pow(2.0f, exposure);
+		//rr = rr * expScale;
+		//gg = gg * expScale;
+		//bb = bb * expScale;
+
+		//// L_out = (L_exposed)^(1/2.2)
 		float invGamma = 1.0f / 2.2f;
-		rr = pow(rr, invGamma);
-		gg = pow(gg, invGamma);
-		bb = pow(bb, invGamma);
+		rr = pow(std::max(0.0f, rr), invGamma);
+		gg = pow(std::max(0.0f, gg), invGamma);
+		bb = pow(std::max(0.0f, bb), invGamma);
 
 		
 		auto toByte = [](float val) {
 			float v = val * 255.0f;
-			if (v < 0.0f) return (unsigned char)0;
-			if (v > 255.0f) return (unsigned char)255;
+			//if (v < 0.0f) return (unsigned char)0;
+			//if (v > 255.0f) return (unsigned char)255;
+			v = std::min(std::max(v,0.f), 255.0f);
 			return (unsigned char)v;
 			};
 

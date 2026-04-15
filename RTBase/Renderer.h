@@ -67,7 +67,7 @@ public:
 		scene = _scene;
 		canvas = _canvas;
 		film = new Film();
-		film->init((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, new BoxFilter());
+		film->init((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, new MitchellFilter());
 		SYSTEM_INFO sysInfo;
 		GetSystemInfo(&sysInfo);
 		numProcs = sysInfo.dwNumberOfProcessors;
@@ -87,17 +87,108 @@ public:
 			return Colour(0.0f, 0.0f, 0.0f);
 		}
 		// Compute direct lighting here
+		float pmf = 0.0f;
+		Light* sampledLight = scene->sampleLight(sampler,pmf);
+		float pdf = 0.0f;
+		Colour Le;
+		Vec3 lightPos = sampledLight->sample(shadingData, sampler, Le, pdf);
+		if (sampledLight->isArea())
+		{
+			// evaluate Geometry term
+			Vec3 xtoLight = lightPos - shadingData.x;
+			float r = xtoLight.length();
+			Vec3 lighttox = -xtoLight;
+			Vec3 lightNormal = sampledLight->normal(shadingData, xtoLight.normalize());
+			float cosAtSurface = std::max(0.0f, Dot(xtoLight.normalize(), shadingData.sNormal));
+			float cosAtLight = std::max(0.0f, Dot(lighttox.normalize(), lightNormal));
+			float g_term = (cosAtSurface * cosAtLight) / (r * r);
+			// evaluate visibility
+			bool visible = scene->visible(shadingData.x, lightPos);
+			
+			
+			// evaluate BSDF
+			Colour c = shadingData.bsdf->evaluate(shadingData, xtoLight.normalize());
+			return c * g_term* (float)visible * Le / (pdf * pmf);
+		}
 		return Colour(0.0f, 0.0f, 0.0f);
 	}
 	Colour pathTrace(Ray& r, Colour& pathThroughput, int depth, Sampler* sampler)
 	{
 		// Add pathtracer code here
-		return Colour(0.0f, 0.0f, 0.0f);
+		//Colour t_pathThroughput = Colour(1.0f, 1.0f, 1.0f);
+		IntersectionData intersection = scene->traverse(r);
+		
+		if (intersection.t >= FLT_MAX)
+		{
+			return scene->background->evaluate(r.dir) * pathThroughput;
+		}
+		ShadingData shadingData = scene->calculateShadingData(intersection, r);
+		
+		Colour L_emission(0.0f, 0.0f, 0.0f);
+		if (shadingData.bsdf->isLight())
+		{
+			
+			if (depth == 0)
+			{
+				L_emission = shadingData.bsdf->emit(shadingData, shadingData.wo);
+				return L_emission;
+			}
+			
+		}
+		Colour L_direct = computeDirect(shadingData, sampler) * pathThroughput;
+		Colour L_indirect(0.0f, 0.0f, 0.0f);
+		float rrProb = 0.9f;
+		if (depth >= 5)
+		{
+			return L_emission + L_direct;
+		}
+		else if (depth > 2)
+		{
+			
+			if (sampler->next() > rrProb)
+			{
+				return L_emission + L_direct;
+			}
+			pathThroughput = pathThroughput / rrProb;
+		}
+
+
+		float r1 = sampler->next();
+		float r2 = sampler->next();
+		Vec3 local_wi = SamplingDistributions::cosineSampleHemisphere(r1, r2);
+		Vec3 world_wi = shadingData.frame.toWorld(local_wi);
+		float pdf = SamplingDistributions::cosineHemispherePDF(local_wi);
+		float cosTheta = std::max(0.0f, local_wi.z);
+		if (pdf > 0.0f)
+		{
+			Ray newRay;
+			newRay.init(shadingData.x + (world_wi * EPSILON), world_wi);
+			Colour f = shadingData.bsdf->evaluate(shadingData, world_wi);
+			pathThroughput = pathThroughput * f * cosTheta / pdf;
+			L_indirect = pathTrace(newRay, pathThroughput, depth + 1, sampler);
+			return L_emission + L_direct + L_indirect;
+		}
+
+
+		
+
+
+		return L_emission + L_direct + L_indirect;
 	}
 	Colour direct(Ray& r, Sampler* sampler)
 	{
 		// Compute direct lighting for an image sampler here
-		return Colour(0.0f, 0.0f, 0.0f);
+		IntersectionData intersection = scene->traverse(r);
+		ShadingData shadingData = scene->calculateShadingData(intersection, r);
+		if (shadingData.t < FLT_MAX)
+		{
+			if (shadingData.bsdf->isLight())
+			{
+				return shadingData.bsdf->emit(shadingData, shadingData.wo);
+			}
+			return computeDirect(shadingData, sampler);
+		}
+		return scene->background->evaluate(r.dir);
 	}
 	Colour albedo(Ray& r)
 	{
@@ -146,13 +237,17 @@ public:
 					{
 						int globalX, globalY;
 						tile.ConvertLocalPosToGlobal(x, y, globalX, globalY);
-						float px = globalX + 0.5f;
-						float py = globalY + 0.5f;
+						float px = globalX + samplers[threadId].next();
+						float py = globalY + samplers[threadId].next();
+						//float px = globalX + 0.5f;
+						//float py = globalY + 0.5f;
 						Ray ray = scene->camera.generateRay(px, py);
 						
 						// Colour col = viewNormals(ray);
-						Colour col = albedo(ray);
-						
+						//Colour col = albedo(ray);
+						Colour pathThroughput = Colour(1.0f, 1.0f, 1.0f);
+						Colour col = pathTrace(ray, pathThroughput, 0, &samplers[threadId]);
+						// Colour col = direct(ray, &samplers[threadId]);
 						film->splat(px, py, col);
 						unsigned char r;
 						unsigned char g;
@@ -176,12 +271,14 @@ public:
 		//{
 		//	for (unsigned int x = 0; x < film->width; x++)
 		//	{
-		//		float px = x + 0.5f;
-		//		float py = y + 0.5f;
+		//		float px = x + samplers[0].next();
+		//		float py = y + samplers[0].next();
 		//		Ray ray = scene->camera.generateRay(px, py);
 		//		
-		//		Colour col = viewNormals(ray);
+		//		//Colour col = viewNormals(ray);
 		//		//Colour col = albedo(ray);
+		//		Colour pathThroughput = Colour(1.0f, 1.0f, 1.0f);
+		//		Colour col = pathTrace(ray, pathThroughput, 0, &samplers[0]);
 		//		film->splat(px, py, col);
 		//		/*unsigned char r = (unsigned char)(col.r * 255);
 		//		unsigned char g = (unsigned char)(col.g * 255);
