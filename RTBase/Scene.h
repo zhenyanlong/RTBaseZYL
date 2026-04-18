@@ -131,7 +131,9 @@ public:
 	}
 	Light* sampleLight(Sampler* sampler, float& pmf)
 	{
-		float index = std::floor(sampler->next() * lights.size());
+		float sample = sampler->next();
+		sample = (sample == 1.0f) ? 1.0f - EPSILON : sample;
+		float index = std::floor(sample * lights.size());
 		pmf = 1.0f / lights.size();
 		return lights[index];
 	}

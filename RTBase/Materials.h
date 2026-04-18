@@ -172,7 +172,7 @@ public:
 	{
 		// Replace this with Mirror evaluation code
 		Vec3 local_wo = shadingData.frame.toLocal(shadingData.wo);
-		return albedo->sample(shadingData.tu, shadingData.tv)/ fabsf(local_wo.z);
+		return albedo->sample(shadingData.tu, shadingData.tv)/ fabs(local_wo.z);
 	}
 	float PDF(const ShadingData& shadingData, const Vec3& wi)
 	{

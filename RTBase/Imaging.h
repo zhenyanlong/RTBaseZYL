@@ -246,7 +246,7 @@ public:
 				if (px >= 0 && px < width && py >= 0 && py < height) {
 					indices[used] = (py * width) + px;
 					filterWeights[used] = filter->filter(px - x, py - y);
-					total += filterWeights[used];
+					total += (filterWeights[used] > 0.0f) ? filterWeights[used] : 0.0f;
 					used++;
 				}
 			}

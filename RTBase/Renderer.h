@@ -128,15 +128,18 @@ public:
 		if (shadingData.bsdf->isLight())
 		{
 			
-			if (depth == 0)
+			//if (depth == 0)
+			if(true)
 			{
 				L_emission = shadingData.bsdf->emit(shadingData, shadingData.wo);
-				return L_emission;
+				return L_emission*pathThroughput;
 			}
 			
 		}
-		Colour L_direct = computeDirect(shadingData, sampler) * pathThroughput;
+		Colour L_direct(0.0f, 0.0f, 0.0f);
+		L_direct = computeDirect(shadingData, sampler) * pathThroughput;
 		
+
 		float rrProb = 0.9f;
 		if (depth >= 5)
 		{
@@ -225,7 +228,7 @@ public:
 		// tile-based rendering
 		// generate tiles
 		std::vector<Tile> tiles;
-		Tile::SplitIntoTiles(film->width, film->height, 128, 128, tiles);
+		Tile::SplitIntoTiles(film->width, film->height, 64, 64, tiles);
 
 		std::atomic<int> nextTile(0);
 		int totalTiles = tiles.size();
