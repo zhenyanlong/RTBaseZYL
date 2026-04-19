@@ -246,7 +246,7 @@ public:
 				if (px >= 0 && px < width && py >= 0 && py < height) {
 					indices[used] = (py * width) + px;
 					filterWeights[used] = filter->filter(px - x, py - y);
-					total += (filterWeights[used] > 0.0f) ? filterWeights[used] : 0.0f;
+					total += filterWeights[used];
 					used++;
 				}
 			}
@@ -286,6 +286,13 @@ public:
 		if (SPP > 0) {
 			c = c / (float)SPP;
 		}
+
+		// L_exposed = L_in * 2^exposure
+		float expScale = std::pow(2.0f, exposure);
+		c.r *= expScale;
+		c.g *= expScale;
+		c.b *= expScale;
+
 		// Apply filmic tonemapping curve
 		c.r = filmicFunc(c.r);
 		c.g = filmicFunc(c.g);

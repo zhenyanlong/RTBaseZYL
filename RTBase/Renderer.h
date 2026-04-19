@@ -16,40 +16,44 @@ class Tile
 {
 	int tilex, tiley;
 	int width, height;
+	int standardWidth, standardHeight; 
 public:
-		Tile(int _x, int _y, int _width = 128, int _height = 128) : tilex(_x), tiley(_y), width(_width), height(_height) {}
+	Tile(int _x, int _y, int _width = 128, int _height = 128, int _stdWidth = 128, int _stdHeight = 128) 
+		: tilex(_x), tiley(_y), width(_width), height(_height), 
+		  standardWidth(_stdWidth), standardHeight(_stdHeight) {}
 
-		int GetTileX() const { return tilex; }
-		int GetTileY() const { return tiley; }
-		int GetTileWidth() const { return width; }
-		int GetTileHeight() const { return height; }
+	int GetTileX() const { return tilex; }
+	int GetTileY() const { return tiley; }
+	int GetTileWidth() const { return width; }
+	int GetTileHeight() const { return height; }
 
-		void GetTileOriPos(int& x, int& y) const
+	void GetTileOriPos(int& x, int& y) const
+	{
+		x = tilex * standardWidth;   
+		y = tiley * standardHeight;  
+	}
+
+	void ConvertLocalPosToGlobal(int localX, int localY, int& globalX, int& globalY) const
+	{
+		globalX = tilex * standardWidth + localX;  
+		globalY = tiley * standardHeight + localY; 
+	}
+
+	static void SplitIntoTiles(int imageWidth, int imageHeight, int tileWidth, int tileHeight, std::vector<Tile>& tiles)
+	{
+		for (int y = 0; y < imageHeight; y += tileHeight)
 		{
-			x = tilex * width;
-			y = tiley * height;
-		}
-
-		void ConvertLocalPosToGlobal(int localX, int localY, int& globalX, int& globalY) const
-		{
-			globalX = tilex * width + localX;
-			globalY = tiley * height + localY;
-		}
-
-		static void SplitIntoTiles(int imageWidth, int imageHeight, int tileWidth, int tileHeight, std::vector<Tile>& tiles)
-		{
-			for (int y = 0; y < imageHeight; y += tileHeight)
+			for (int x = 0; x < imageWidth; x += tileWidth)
 			{
-				for (int x = 0; x < imageWidth; x += tileWidth)
-				{
-					int currentTileWidth = std::min(tileWidth, imageWidth - x);
-					int currentTileHeight = std::min(tileHeight, imageHeight - y);
-					tiles.emplace_back(x / tileWidth, y / tileHeight, currentTileWidth, currentTileHeight);
-				}
+				int currentTileWidth = std::min(tileWidth, imageWidth - x);
+				int currentTileHeight = std::min(tileHeight, imageHeight - y);
+				
+				tiles.emplace_back(x / tileWidth, y / tileHeight, 
+				                   currentTileWidth, currentTileHeight,
+				                   tileWidth, tileHeight);
 			}
 		}
-
-		
+	}
 };
 
 class RayTracer
@@ -131,8 +135,8 @@ public:
 			//if (depth == 0)
 			if(true)
 			{
-				L_emission = shadingData.bsdf->emit(shadingData, shadingData.wo);
-				return L_emission*pathThroughput;
+				L_emission = shadingData.bsdf->emit(shadingData, shadingData.wo)* pathThroughput;
+				//return L_emission*pathThroughput;
 			}
 			
 		}
@@ -166,22 +170,30 @@ public:
 		float pdf;
 		Vec3 world_wi =shadingData.bsdf->sample(shadingData,sampler, f, pdf);
 		Vec3 local_wi = shadingData.frame.toLocal(world_wi);
-		float cosTheta = std::max(0.0f, local_wi.z);
-		if (pdf > 0.0f)
+		float cosTheta = std::abs(local_wi.z);
+		if (pdf > 1e-4f)
 		{
 			Ray newRay;
 			newRay.init(shadingData.x + (world_wi * EPSILON), world_wi);
 			
 			pathThroughput = pathThroughput * f * cosTheta / pdf;
 			L_indirect = pathTrace(newRay, pathThroughput, depth + 1, sampler);
-			return L_emission + L_direct + L_indirect;
+			//return L_emission + L_direct + L_indirect;
 		}
 
 
+		Colour final_color = L_emission + L_direct + L_indirect;
+
 		
+		float maxRadiance = 10.0f;
+		final_color.r = std::min(final_color.r, maxRadiance);
+		final_color.g = std::min(final_color.g, maxRadiance);
+		final_color.b = std::min(final_color.b, maxRadiance);
+		
+		return final_color;
 
 
-		return L_emission + L_direct + L_indirect;
+		//return L_emission + L_direct + L_indirect;
 	}
 	Colour direct(Ray& r, Sampler* sampler)
 	{
@@ -228,7 +240,7 @@ public:
 		// tile-based rendering
 		// generate tiles
 		std::vector<Tile> tiles;
-		Tile::SplitIntoTiles(film->width, film->height, 64, 64, tiles);
+		Tile::SplitIntoTiles(film->width, film->height, 128, 128, tiles);
 
 		std::atomic<int> nextTile(0);
 		int totalTiles = tiles.size();
@@ -251,11 +263,12 @@ public:
 						//float py = globalY + 0.5f;
 						Ray ray = scene->camera.generateRay(px, py);
 						
-						// Colour col = viewNormals(ray);
+						//Colour col = viewNormals(ray);
 						//Colour col = albedo(ray);
 						Colour pathThroughput = Colour(1.0f, 1.0f, 1.0f);
 						Colour col = pathTrace(ray, pathThroughput, 0, &samplers[threadId]);
-						// Colour col = direct(ray, &samplers[threadId]);
+						//Colour col = direct(ray, &samplers[threadId]);
+						//Colour col = albedo(ray);
 						film->splat(px, py, col);
 						unsigned char r;
 						unsigned char g;
