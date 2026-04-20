@@ -7,6 +7,7 @@
 #include "GamesEngineeringBase.h"
 #include <unordered_map>
 
+
 void runTests()
 {
 	// Add test code here
@@ -49,10 +50,12 @@ int main(int argc, char *argv[])
 	// Add call to tests if required
 	// runTests();
 	
+	
+	
 	// Initialize default parameters
 	//std::string sceneName = "coffee";
-	//std::string sceneName = "bathroom";
-	std::string sceneName = "bathroom2";
+	std::string sceneName = "bathroom";
+	//std::string sceneName = "bathroom2";
 	//std::string sceneName = "cornell-box";
 	//std::string sceneName = "teapot-full";
 	//std::string sceneName = "Car2";
@@ -104,6 +107,7 @@ int main(int argc, char *argv[])
 	canvas.create((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, "Tracer", false);
 	RayTracer rt;
 	rt.init(scene, &canvas);
+
 	bool running = true;
 	GamesEngineeringBase::Timer timer;
 	while (running)

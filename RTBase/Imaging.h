@@ -319,9 +319,9 @@ public:
 
 		//// L_out = (L_exposed)^(1/2.2)
 		float invGamma = 1.0f / 2.2f;
-		rr = pow(std::max(0.0f, rr), invGamma);
-		gg = pow(std::max(0.0f, gg), invGamma);
-		bb = pow(std::max(0.0f, bb), invGamma);
+		c.r = pow(std::max(0.0f, rr), invGamma);
+		c.g = pow(std::max(0.0f, gg), invGamma);
+		c.b = pow(std::max(0.0f, bb), invGamma);
 
 		
 		auto toByte = [](float val) {

@@ -11,6 +11,7 @@
 #include <thread>
 #include <functional>
 #include <mutex>
+#include <OpenImageDenoise/oidn.hpp>
 
 class Tile
 {
@@ -66,6 +67,15 @@ public:
 	std::thread **threads;
 	int numProcs;
 	std::mutex filmMutex;
+
+	oidn::DeviceRef oidnDevice;
+	oidn::BufferRef colorBuf;
+	oidn::BufferRef albedoBuf;
+	oidn::BufferRef normalBuf;
+	oidn::BufferRef outputBuf;
+	oidn::FilterRef oidnFilter;
+	bool oidnInitialized = false;
+
 	void init(Scene* _scene, GamesEngineeringBase::Window* _canvas)
 	{
 		scene = _scene;
@@ -77,11 +87,44 @@ public:
 		numProcs = sysInfo.dwNumberOfProcessors;
 		threads = new std::thread*[numProcs];
 		samplers = new MTRandom[numProcs];
+		
+
+		// init OIDN
+		unsigned int width = (unsigned int)scene->camera.width;
+		unsigned int height = (unsigned int)scene->camera.height;
+		oidnDevice = oidn::newDevice();
+		oidnDevice.commit();
+		colorBuf = oidnDevice.newBuffer(width * height * 3 * sizeof(float));
+		albedoBuf = oidnDevice.newBuffer(width * height * 3 * sizeof(float));
+		normalBuf = oidnDevice.newBuffer(width * height * 3 * sizeof(float));
+		outputBuf = oidnDevice.newBuffer(width * height * 3 * sizeof(float));
+		oidnFilter = oidnDevice.newFilter("RT");
+		oidnFilter.setImage("color", colorBuf, oidn::Format::Float3, width, height);
+		oidnFilter.setImage("albedo", albedoBuf, oidn::Format::Float3, width, height);
+		oidnFilter.setImage("normal", normalBuf, oidn::Format::Float3, width, height);
+		oidnFilter.setImage("output", outputBuf, oidn::Format::Float3, width, height);
+		oidnFilter.set("hdr", true);
+		oidnFilter.set("cleanAux", true);
+		oidnFilter.commit();
+
+		const char* errorMessage;
+		if (oidnDevice.getError(errorMessage) != oidn::Error::None)
+			std::cout << "OIDN Init Error: " << errorMessage << std::endl;
+		else
+			oidnInitialized = true;
+		std::cout << "oidnInitialized: " << (oidnInitialized ? "true" : "false") << std::endl;
 		clear();
 	}
 	void clear()
 	{
 		film->clear();
+		if (oidnInitialized) {
+			unsigned int bufSize = film->width * film->height * 3 * sizeof(float);
+			memset(colorBuf.getData(), 0, bufSize);
+			memset(albedoBuf.getData(), 0, bufSize);
+			memset(normalBuf.getData(), 0, bufSize);
+			memset(outputBuf.getData(), 0, bufSize);
+		}
 	}
 	Colour computeDirect(ShadingData shadingData, Sampler* sampler)
 	{
@@ -171,7 +214,7 @@ public:
 		Vec3 world_wi =shadingData.bsdf->sample(shadingData,sampler, f, pdf);
 		Vec3 local_wi = shadingData.frame.toLocal(world_wi);
 		float cosTheta = std::abs(local_wi.z);
-		if (pdf > 1e-4f)
+		if (pdf > EPSILON)
 		{
 			Ray newRay;
 			newRay.init(shadingData.x + (world_wi * EPSILON), world_wi);
@@ -230,7 +273,7 @@ public:
 		if (intersection.t < FLT_MAX)
 		{
 			ShadingData shadingData = scene->calculateShadingData(intersection, r);
-			return Colour(fabsf(shadingData.sNormal.x), fabsf(shadingData.sNormal.y), fabsf(shadingData.sNormal.z));
+			return Colour(shadingData.sNormal.x, shadingData.sNormal.y, shadingData.sNormal.z);
 		}
 		return Colour(0.0f, 0.0f, 0.0f);
 	}
@@ -259,22 +302,45 @@ public:
 						tile.ConvertLocalPosToGlobal(x, y, globalX, globalY);
 						float px = globalX + samplers[threadId].next();
 						float py = globalY + samplers[threadId].next();
+						float normal_px = globalX + 0.5f;
+						float normal_py = globalY + 0.5f;
 						//float px = globalX + 0.5f;
 						//float py = globalY + 0.5f;
 						Ray ray = scene->camera.generateRay(px, py);
+						Ray uniform_ray = scene->camera.generateRay(normal_px, normal_py);
+
+						Colour albedo_col = albedo(ray);
+						Colour normal_col = viewNormals(ray);
 						
-						//Colour col = viewNormals(ray);
-						//Colour col = albedo(ray);
 						Colour pathThroughput = Colour(1.0f, 1.0f, 1.0f);
 						Colour col = pathTrace(ray, pathThroughput, 0, &samplers[threadId]);
 						//Colour col = direct(ray, &samplers[threadId]);
 						//Colour col = albedo(ray);
 						film->splat(px, py, col);
-						unsigned char r;
+						/*unsigned char r;
 						unsigned char g;
 						unsigned char b;
-						film->tonemap(globalX, globalY, r, g, b);
-						canvas->draw(globalX, globalY, r, g, b);
+						film->tonemap(globalX, globalY, r, g, b);*/
+						//canvas->draw(globalX, globalY, r, g, b);
+						// fill color buffer
+						if (oidnInitialized) {
+							int pixelIndex = globalY * film->width + globalX;
+							int bufIndex = pixelIndex * 3;
+							// albedo buffer
+							float* albedoData = (float*)albedoBuf.getData();
+							albedoData[bufIndex] = albedo_col.r;
+							albedoData[bufIndex + 1] = albedo_col.g;
+							albedoData[bufIndex + 2] = albedo_col.b;
+							// normal buffer
+							float* normalData = (float*)normalBuf.getData();
+							normalData[bufIndex] = normal_col.r;
+							normalData[bufIndex + 1] = normal_col.g;
+							normalData[bufIndex + 2] = normal_col.b;
+							float* colorData = (float*)colorBuf.getData();
+							colorData[bufIndex] += col.r;
+							colorData[bufIndex + 1] += col.g;
+							colorData[bufIndex + 2] += col.b;
+						}
 					}
 				}
 			}
@@ -313,6 +379,93 @@ public:
 		//		canvas->draw(x, y, r, g, b);
 		//	}
 		//}
+		// OIDN Denoising
+		if (oidnInitialized) {
+			/*float* colorData = (float*)colorBuf.getData();
+			float invSPP = 1.0f / (float)film->SPP;
+			for (unsigned int y = 0; y < film->height; y++) {
+				for (unsigned int x = 0; x < film->width; x++) {
+					int pixelIndex = y * film->width + x;
+					int bufIndex = pixelIndex * 3;
+					
+					colorData[bufIndex] += film->film[pixelIndex].r;
+					colorData[bufIndex + 1] += film->film[pixelIndex].g;
+					colorData[bufIndex + 2] += film->film[pixelIndex].b;
+				}
+			}*/
+			oidnFilter.execute();
+			float* outputData = (float*)outputBuf.getData();
+
+			auto toByte = [](float val) {
+				float v = val * 255.0f;
+				v = std::min(std::max(v, 0.f), 255.0f);
+				return (unsigned char)v;
+				};
+
+			for (unsigned int y = 0; y < film->height; y++)
+			{
+				for (unsigned int x = 0; x < film->width; x++)
+				{
+					int index = (y * film->width + x) * 3;
+					float invSPP = 1.0f / (float)film->SPP;
+					float r = outputData[index] * invSPP;
+					float g = outputData[index + 1] * invSPP;
+					float b = outputData[index + 2] * invSPP;
+					// tonemap 
+					// L_exposed = L_in * 2^exposure
+					float expScale = std::pow(2.0f, 1.0f);
+					r *= expScale;
+					g *= expScale;
+					b *= expScale;
+
+					// Apply filmic tonemapping curve
+					r = film->filmicFunc(r);
+					g = film->filmicFunc(g);
+					b = film->filmicFunc(b);
+					const float W = 11.2f;
+					float denom = 1.0f / film->filmicFunc(W);
+					r = r * denom;
+					g = g * denom;
+					b = b * denom;
+
+					//c.r = std::max(0.0f, std::min(1.0f, c.r));
+					//c.g = std::max(0.0f, std::min(1.0f, c.g));
+					//c.b = std::max(0.0f, std::min(1.0f, c.b));
+
+					
+
+					////L_exposed = L_in * 2^exposure
+					//float expScale = pow(2.0f, exposure);
+					//rr = rr * expScale;
+					//gg = gg * expScale;
+					//bb = bb * expScale;
+
+					//// L_out = (L_exposed)^(1/2.2)
+					float invGamma = 1.0f / 2.2f;
+					r = pow(std::max(0.0f, r), invGamma);
+					g = pow(std::max(0.0f, g), invGamma);
+					b = pow(std::max(0.0f, b), invGamma);
+					unsigned char charR = toByte(r);
+					unsigned char charG = toByte(g);
+					unsigned char charB = toByte(b);
+					canvas->draw(x, y, charR, charG, charB);
+				}
+			}
+		}
+		else
+		{
+			for (unsigned int y = 0; y < film->height; y++)
+			{
+				for (unsigned int x = 0; x < film->width; x++)
+				{
+					unsigned char r;
+					unsigned char g;
+					unsigned char b;
+					film->tonemap(x, y, r, g, b);
+					canvas->draw(x, y, r, g, b);
+				}
+			}
+		}
 	}
 	int getSPP()
 	{
