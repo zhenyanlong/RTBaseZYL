@@ -759,9 +759,13 @@ public:
 		float cosAlpha = std::max(0.0f, Dot(local_wr, local_wi));
 
 		// fr = (e + 2) / (2 * PI) * max(0, wr · wi)^e
-		float fr = ((e + 2.0f) / (2.0f * M_PI)) * std::pow(cosAlpha, e);
+		float fp = ((e + 2.0f) / (2.0f * M_PI)) * std::pow(cosAlpha, e);
 		Colour baseColor = albedo->sample(shadingData.tu, shadingData.tv);
-		return baseColor * fr;
+		Colour fd = baseColor / M_PI;
+		
+		float F = ShadingHelper::fresnelDielectric(Dot(local_wr, local_wi), intIOR, extIOR);
+
+		return fd*(1-F) + Colour(1.0f,1.0f,1.0f)* fp * F;
 	}
 	float PDF(const ShadingData& shadingData, const Vec3& wi)
 	{

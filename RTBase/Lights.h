@@ -131,15 +131,74 @@ class EnvironmentMap : public Light
 {
 public:
 	Texture* env;
+
+	// tabulated sampling data 
+	std::vector<float> marginalCDF;
+	std::vector<float> conditionalCDF;
+	float envTotalWeight = 0.0f;
 	EnvironmentMap(Texture* _env)
 	{
 		env = _env;
+		
+		{
+			int w = env->width;
+			int h = env->height;
+
+			marginalCDF.resize(h, 0.0f);
+			conditionalCDF.resize(w * h, 0.0f);
+
+			std::vector<float> rowWeights(h, 0.0f);
+
+			// calculate conditional CDF
+			for (int j = 0; j < h; ++j)
+			{
+				
+				float v_theta = ((float)j + 0.5f) / (float)h * M_PI;
+				float sinTheta = sinf(v_theta);
+				float rowSum = 0.0f;
+
+				for (int i = 0; i < w; ++i)
+				{
+					float lum = env->texels[(j * w) + i].Lum();
+					float f_uv = lum * sinTheta; // F[u, v]
+					rowSum += f_uv;
+					conditionalCDF[j * w + i] = rowSum;
+				}
+				rowWeights[j] = rowSum;
+				envTotalWeight += rowSum;
+
+				
+				if (rowSum > 0.0f) {
+					for (int i = 0; i < w; ++i) {
+						conditionalCDF[j * w + i] /= rowSum;
+					}
+				}
+			}
+
+			// calculate marginal CDF
+			float currentMarginal = 0.0f;
+			for (int j = 0; j < h; ++j)
+			{
+				currentMarginal += rowWeights[j];
+				if (envTotalWeight > 0.0f) {
+					marginalCDF[j] = currentMarginal / envTotalWeight;
+				}
+				else {
+					marginalCDF[j] = (float)(j + 1) / h;
+				}
+			}
+			if (envTotalWeight > 0.0f) {
+				marginalCDF[h - 1] = 1.0f;
+			}
+		}
 	}
+
+
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
 		// Assignment: Update this code to importance sampling lighting based on luminance of each pixel
-		Vec3 wi = SamplingDistributions::uniformSampleSphere(sampler->next(), sampler->next());
-		pdf = SamplingDistributions::uniformSpherePDF(wi);
+		Vec3 wi = sampleDirectionFromLight(sampler, pdf);
+		//pdf = SamplingDistributions::uniformSpherePDF(wi);
 		reflectedColour = evaluate(wi);
 		return wi;
 	}
@@ -154,7 +213,18 @@ public:
 	float PDF(const ShadingData& shadingData, const Vec3& wi)
 	{
 		// Assignment: Update this code to return the correct PDF of luminance weighted importance sampling
-		return SamplingDistributions::uniformSpherePDF(wi);
+		float u = atan2f(wi.z, wi.x);
+		u = (u < 0.0f) ? u + (2.0f * M_PI) : u;
+		u = u / (2.0f * M_PI);
+		float v = acosf(wi.y) / M_PI;
+
+		int w = env->width;
+		int h = env->height;
+		int ui = std::min((int)(u * w), w - 1);
+		int vi = std::min((int)(v * h), h - 1);
+
+		float lum = env->texels[(vi * w) + ui].Lum();
+		return (lum * w * h) / (envTotalWeight * 2.0f * M_PI * M_PI);
 	}
 	bool isArea()
 	{
@@ -190,8 +260,36 @@ public:
 	Vec3 sampleDirectionFromLight(Sampler* sampler, float& pdf)
 	{
 		// Replace this tabulated sampling of environment maps
-		Vec3 wi = SamplingDistributions::uniformSampleSphere(sampler->next(), sampler->next());
-		pdf = SamplingDistributions::uniformSpherePDF(wi);
+		int w = env->width;
+		int h = env->height;
+
+		float xi_1 = sampler->next();
+		float xi_2 = sampler->next();
+		float xi_3 = sampler->next();
+		float xi_4 = sampler->next();
+
+		// sample v
+		auto v_it = std::upper_bound(marginalCDF.begin(), marginalCDF.end(), xi_1);
+		int v = std::max(0, std::min((int)std::distance(marginalCDF.begin(), v_it), h - 1));
+
+		// sample u 
+		auto row_start = conditionalCDF.begin() + v * w;
+		auto row_end = row_start + w;
+		auto u_it = std::upper_bound(row_start, row_end, xi_2);
+		int u = std::max(0, std::min((int)std::distance(row_start, u_it), w - 1));
+
+		// mapping to [0, 1]
+		float u_cont = ((float)u + xi_3) / (float)w;
+		float v_cont = ((float)v + xi_4) / (float)h;
+
+		// mapping to spherical coordinates
+		float phi = u_cont * 2.0f * M_PI;
+		float theta = v_cont * M_PI;
+
+		Vec3 wi(sinf(theta) * cosf(phi), cosf(theta), sinf(theta) * sinf(phi));
+
+		pdf = PDF(ShadingData(), wi);
+
 		return wi;
 	}
 };

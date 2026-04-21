@@ -111,7 +111,7 @@ public:
 		if (oidnDevice.getError(errorMessage) != oidn::Error::None)
 			std::cout << "OIDN Init Error: " << errorMessage << std::endl;
 		else
-			oidnInitialized = true;
+			oidnInitialized = false;
 		std::cout << "oidnInitialized: " << (oidnInitialized ? "true" : "false") << std::endl;
 		clear();
 	}
@@ -155,8 +155,30 @@ public:
 			
 			// evaluate BSDF
 			Colour c = shadingData.bsdf->evaluate(shadingData, xtoLight.normalize());
+
 			return c * g_term* (float)visible * Le / (pdf * pmf);
 		}
+		else
+		{
+			// lightPos is direction in environment light
+			Vec3 wi = lightPos;
+			float cosTheta = std::max(0.0f, Dot(wi, shadingData.sNormal));
+
+			Vec3  envirOrigin = shadingData.x + wi * EPSILON;
+			Ray   envirRay;
+			envirRay.init(envirOrigin, wi);
+			bool  visible = scene->bvh->traverseVisible(
+				envirRay, scene->triangles,
+				2.0f * use<SceneBounds>().sceneRadius);
+
+			float pdfLight = sampledLight->PDF(shadingData, wi);
+			float pdfBSDF = shadingData.bsdf->PDF(shadingData, wi);
+			Colour c = shadingData.bsdf->evaluate(shadingData, wi);
+			float misWeight = (pdfLight * pdfLight) / (pdfLight * pdfLight + pdfBSDF * pdfBSDF);
+			
+			return c * cosTheta * (float)visible * Le * misWeight / (pdf * pmf);
+		}
+		
 		return Colour(0.0f, 0.0f, 0.0f);
 	}
 	Colour pathTrace(Ray& r, Colour& pathThroughput, int depth, Sampler* sampler)
@@ -167,7 +189,10 @@ public:
 		
 		if (intersection.t >= FLT_MAX)
 		{
-			return scene->background->evaluate(r.dir) * pathThroughput;
+			if(depth == 0)
+				return scene->background->evaluate(r.dir) * pathThroughput;
+			else
+				return Colour(0.0f, 0.0f, 0.0f);
 		}
 		ShadingData shadingData = scene->calculateShadingData(intersection, r);
 		
@@ -220,14 +245,43 @@ public:
 			newRay.init(shadingData.x + (world_wi * EPSILON), world_wi);
 			
 			pathThroughput = pathThroughput * f * cosTheta / pdf;
-			L_indirect = pathTrace(newRay, pathThroughput, depth + 1, sampler);
+			IntersectionData nextIntersection = scene->traverse(newRay);
+			bool IsSpecular = shadingData.bsdf->isPureSpecular();
+
+			if (nextIntersection.t >= FLT_MAX)
+			{
+				Colour nextc = scene->background->evaluate(newRay.dir);
+
+				if (IsSpecular)
+				{
+					L_indirect = pathThroughput * nextc;
+				}
+				else
+				{
+					float pdfLight = scene->background->PDF(ShadingData{}, newRay.dir);
+					float pmf = 1.0f / (float)scene->lights.size();
+					float actualLightPdf = pdfLight * pmf;
+
+					float bsdfPdf2 = pdf * pdf;
+					float lightPdf2 = actualLightPdf * actualLightPdf;
+					float misWeight = bsdfPdf2 / (bsdfPdf2 + lightPdf2);
+
+					L_indirect = pathThroughput * nextc * misWeight;
+				}
+			}
+			else
+			{
+				L_indirect = pathTrace(newRay, pathThroughput, depth + 1, sampler);
+			}
+			//L_indirect = pathTrace(newRay, pathThroughput, depth + 1, sampler);
 			//return L_emission + L_direct + L_indirect;
+
 		}
 
 
 		Colour final_color = L_emission + L_direct + L_indirect;
 
-		
+		// limit max radiance
 		float maxRadiance = 10.0f;
 		final_color.r = std::min(final_color.r, maxRadiance);
 		final_color.g = std::min(final_color.g, maxRadiance);

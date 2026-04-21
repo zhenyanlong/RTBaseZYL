@@ -234,8 +234,8 @@ public:
 	void splat(const float x, const float y, const Colour& L)
 	{
 		// Code to splat a smaple with colour L into the image plane using an ImageFilter
-		float filterWeights[25]; // Storage to cache weights
-		unsigned int indices[25]; // Store indices to minimize computations
+		float filterWeights[25];
+		unsigned int indices[25]; 
 		unsigned int used = 0;
 		float total = 0;
 		int size = filter->size();
@@ -307,9 +307,7 @@ public:
 		//c.g = std::max(0.0f, std::min(1.0f, c.g));
 		//c.b = std::max(0.0f, std::min(1.0f, c.b));
 
-		float rr = c.r;
-		float gg = c.g;
-		float bb = c.b;
+		
 
 		////L_exposed = L_in * 2^exposure
 		//float expScale = pow(2.0f, exposure);
@@ -319,9 +317,9 @@ public:
 
 		//// L_out = (L_exposed)^(1/2.2)
 		float invGamma = 1.0f / 2.2f;
-		c.r = pow(std::max(0.0f, rr), invGamma);
-		c.g = pow(std::max(0.0f, gg), invGamma);
-		c.b = pow(std::max(0.0f, bb), invGamma);
+		c.r = pow(std::max(0.0f, c.r), invGamma);
+		c.g = pow(std::max(0.0f, c.g), invGamma);
+		c.b = pow(std::max(0.0f, c.b), invGamma);
 
 		
 		auto toByte = [](float val) {
@@ -332,9 +330,9 @@ public:
 			return (unsigned char)v;
 			};
 
-		r = toByte(rr);
-		g = toByte(gg);
-		b = toByte(bb);
+		r = toByte(c.r);
+		g = toByte(c.g);
+		b = toByte(c.b);
 
 
 	}

@@ -471,9 +471,9 @@ public:
 					{
 						intersection.t = ti;
 						intersection.ID = i;
-						intersection.alpha = u;
-						intersection.beta = v;
-						intersection.gamma = 1.0f - (u + v);
+						intersection.alpha = 1.0f - (u + v);
+						intersection.beta = u;
+						intersection.gamma = v;
 					}
 				}
 			}
