@@ -766,6 +766,8 @@ public:
 		float F = ShadingHelper::fresnelDielectric(Dot(local_wr, local_wi), intIOR, extIOR);
 
 		return fd*(1-F) + Colour(1.0f,1.0f,1.0f)* fp * F;
+		// support to albedoBuf
+		/*return albedo->sample(shadingData.tu, shadingData.tv) / M_PI;*/
 	}
 	float PDF(const ShadingData& shadingData, const Vec3& wi)
 	{

@@ -111,7 +111,7 @@ public:
 		if (oidnDevice.getError(errorMessage) != oidn::Error::None)
 			std::cout << "OIDN Init Error: " << errorMessage << std::endl;
 		else
-			oidnInitialized = false;
+			oidnInitialized = true;
 		std::cout << "oidnInitialized: " << (oidnInitialized ? "true" : "false") << std::endl;
 		clear();
 	}
@@ -317,7 +317,7 @@ public:
 			{
 				return shadingData.bsdf->emit(shadingData, shadingData.wo);
 			}
-			return shadingData.bsdf->evaluate(shadingData, Vec3(0, 1, 0));
+			return shadingData.bsdf->evaluate(shadingData, Vec3(0, 0, 1));
 		}
 		return scene->background->evaluate(r.dir);
 	}
@@ -448,6 +448,7 @@ public:
 				}
 			}*/
 			oidnFilter.execute();
+			//float* outputData = (float*)albedoBuf.getData();
 			float* outputData = (float*)outputBuf.getData();
 
 			auto toByte = [](float val) {
