@@ -332,6 +332,7 @@ public:
 		if (intersection.t < FLT_MAX)
 		{
 			ShadingData shadingData = scene->calculateShadingData(intersection, r);
+			//return Colour(fabs(shadingData.sNormal.x), fabs(shadingData.sNormal.y), fabs(shadingData.sNormal.z));
 			return Colour(shadingData.sNormal.x, shadingData.sNormal.y, shadingData.sNormal.z);
 		}
 		return Colour(0.0f, 0.0f, 0.0f);
@@ -364,11 +365,50 @@ public:
 		film->splat(pixelX, pixelY, finalContribution);
 	}
 
-	Colour lightTracePath(Ray& r, Colour& pathThroughput, Colour Le, Sampler* sampler)
+	void lightTracePath(Ray& r, Colour& pathThroughput, Colour Le, Sampler* sampler)
 	{
+
+		const float rrProb = 0.9f;
+		float r1 = sampler->next();
+		if (r1 > rrProb)
+		{
+			return; 
+		}
+		pathThroughput = pathThroughput / rrProb;
+
+		IntersectionData intersection = scene->traverse(r);
+
+		if (intersection.t >= FLT_MAX)
+		{
+			return;
+		}
+		ShadingData shadingData = scene->calculateShadingData(intersection, r);
 		
+		Colour f;
+		float pdf;
+		Vec3 world_wi = shadingData.bsdf->sample(shadingData,sampler,f,pdf);
+		Vec3 local_wi = shadingData.frame.toLocal(world_wi);
+		Vec3 local_wo = shadingData.frame.toLocal(shadingData.wo);
+
+		bool IsTransmission = (local_wi.z * local_wo.z < 0);
+		float nonsymmetricFactor = 1.0f;
+		if (IsTransmission)
+		{
+			float up = fabs(Dot(shadingData.wo, shadingData.sNormal))*fabs(Dot(world_wi,shadingData.gNormal));
+			float down = fabs(Dot(shadingData.wo, shadingData.gNormal)) * fabs(Dot(world_wi, shadingData.sNormal));
+			nonsymmetricFactor = up / down;
+		}
+		Colour col = pathThroughput * shadingData.bsdf->evaluate(shadingData, world_wi) * Le;
+		connectToCamera(shadingData.x, shadingData.sNormal, col * nonsymmetricFactor);
 		
-		return Colour(0.0f, 0.0f, 0.0f);
+		float cosTheta = Dot(world_wi, shadingData.sNormal);
+		pathThroughput = pathThroughput * cosTheta * nonsymmetricFactor / pdf;
+
+		Ray nextRay;
+		nextRay.init(shadingData.x + world_wi * EPSILON, world_wi);
+		lightTracePath(nextRay, pathThroughput, Le, sampler);
+
+		return;
 	}
 
 	void lightTrace(Sampler* sampler)
@@ -419,6 +459,10 @@ public:
 					{
 						int globalX, globalY;
 						tile.ConvertLocalPosToGlobal(x, y, globalX, globalY);
+						/*float r1 = samplers[threadId].next();
+						float r2 = samplers[threadId].next();
+						r1 = (r1 >= 1.0f) ? 1.0f - 1e4f : r1;
+						r2 = (r2 >= 1.0f) ? 1.0f - 1e4f : r2;*/
 						float px = globalX + samplers[threadId].next();
 						float py = globalY + samplers[threadId].next();
 						float normal_px = globalX + 0.5f;

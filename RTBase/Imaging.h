@@ -241,7 +241,9 @@ public:
 		// Code to splat a smaple with colour L into the image plane using an ImageFilter
 		if (oidnInitialized)
 		{
-			 
+			if ((int)x < 0 || (int)x >= width || (int)y < 0 || (int)y >= height)
+				return;
+
 			int pixelIndex = (int)y * width + (int)x;
 			film[pixelIndex] = film[pixelIndex] + L;
 
