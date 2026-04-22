@@ -6,6 +6,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define __STDC_LIB_EXT1__
 #include "stb_image_write.h"
+#include <OpenImageDenoise/oidn.hpp>
 
 // Stop warnings about buffer overruns if size is zero. Size should never be zero and if it is the code handles it.
 #pragma warning( disable : 6386)
@@ -227,34 +228,58 @@ class Film
 {
 public:
 	Colour* film;
+	oidn::BufferRef* colorBuf = nullptr;
+	oidn::BufferRef* outputBuf = nullptr;
 	unsigned int width;
 	unsigned int height;
 	int SPP;
 	ImageFilter* filter;
+
+	bool oidnInitialized = false;
 	void splat(const float x, const float y, const Colour& L)
 	{
 		// Code to splat a smaple with colour L into the image plane using an ImageFilter
-		float filterWeights[25];
-		unsigned int indices[25]; 
-		unsigned int used = 0;
-		float total = 0;
-		int size = filter->size();
-		for (int i = -size; i <= size; i++) {
-			for (int j = -size; j <= size; j++) {
-				int px = (int)x + j;
-				int py = (int)y + i;
-				if (px >= 0 && px < width && py >= 0 && py < height) {
-					indices[used] = (py * width) + px;
-					filterWeights[used] = filter->filter(px - x, py - y);
-					total += filterWeights[used];
-					used++;
+		if (oidnInitialized)
+		{
+			 
+			int pixelIndex = (int)y * width + (int)x;
+			film[pixelIndex] = film[pixelIndex] + L;
+
+			float* colorData = (float*)colorBuf->getData();
+			int bufIndex = pixelIndex * 3;
+			float invSPP = 1.0f / (float)SPP;
+			colorData[bufIndex] = film[pixelIndex].r* invSPP;
+			colorData[bufIndex + 1] = film[pixelIndex].g * invSPP;
+			colorData[bufIndex + 2] = film[pixelIndex].b * invSPP;
+			 return;
+		}
+		else
+		{
+			float filterWeights[25];
+			unsigned int indices[25];
+			unsigned int used = 0;
+			float total = 0;
+			int size = filter->size();
+			for (int i = -size; i <= size; i++) {
+				for (int j = -size; j <= size; j++) {
+					int px = (int)x + j;
+					int py = (int)y + i;
+					if (px >= 0 && px < width && py >= 0 && py < height) {
+						indices[used] = (py * width) + px;
+						filterWeights[used] = filter->filter(px - x, py - y);
+						total += filterWeights[used];
+						used++;
+					}
 				}
 			}
+			if (total == 0) return;
+			for (int i = 0; i < used; i++) {
+				film[indices[i]] = film[indices[i]] + (L * filterWeights[i] / total);
+			}
 		}
-		if (total == 0) return;
-		for (int i = 0; i < used; i++) {
-			film[indices[i]] = film[indices[i]] + (L * filterWeights[i] / total);
-		}
+		
+		
+		
 	}
 
 	float filmicFunc(float x)
@@ -281,11 +306,24 @@ public:
 		r = (unsigned char)std::max(std::min((std::pow(c.r * factor2e, invGamma) * 255.0f),255.0f),0.0f);
 		g = (unsigned char)std::max(std::min((std::pow(c.g * factor2e, invGamma) * 255.0f), 255.0f), 0.0f);
 		b = (unsigned char)std::max(std::min((std::pow(c.b * factor2e, invGamma) * 255.0f), 255.0f), 0.0f);*/
-		
-		Colour c = film[y * width + x];
-		if (SPP > 0) {
-			c = c / (float)SPP;
+		Colour c;
+		if (oidnInitialized)
+		{
+			float* colorData = (float*)outputBuf->getData();
+			int index = (y * width + x) * 3;
+			c = Colour(colorData[index], colorData[index + 1], colorData[index + 2]);
+			
+			
 		}
+		else
+		{
+			c = film[y * width + x];
+			if (SPP > 0) {
+				c = c / (float)SPP;
+			}
+		}
+		
+		
 
 		// L_exposed = L_in * 2^exposure
 		float expScale = std::pow(2.0f, exposure);
@@ -337,11 +375,18 @@ public:
 
 	}
 	// Do not change any code below this line
-	void init(int _width, int _height, ImageFilter* _filter)
+	void init(int _width, int _height, ImageFilter* _filter, oidn::BufferRef* _colorBuf = nullptr, oidn::BufferRef* _outputBuf = nullptr)
 	{
 		width = _width;
 		height = _height;
 		film = new Colour[width * height];
+		if (_colorBuf != nullptr)
+		{
+			colorBuf = _colorBuf;
+			outputBuf = _outputBuf;
+			oidnInitialized = true;
+		}
+		
 		clear();
 		filter = _filter;
 	}

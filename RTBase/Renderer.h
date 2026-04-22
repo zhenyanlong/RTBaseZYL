@@ -80,8 +80,7 @@ public:
 	{
 		scene = _scene;
 		canvas = _canvas;
-		film = new Film();
-		film->init((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, new MitchellFilter());
+		
 		SYSTEM_INFO sysInfo;
 		GetSystemInfo(&sysInfo);
 		numProcs = sysInfo.dwNumberOfProcessors;
@@ -104,7 +103,7 @@ public:
 		oidnFilter.setImage("normal", normalBuf, oidn::Format::Float3, width, height);
 		oidnFilter.setImage("output", outputBuf, oidn::Format::Float3, width, height);
 		oidnFilter.set("hdr", true);
-		oidnFilter.set("cleanAux", true);
+		//oidnFilter.set("cleanAux", true);
 		oidnFilter.commit();
 
 		const char* errorMessage;
@@ -113,6 +112,12 @@ public:
 		else
 			oidnInitialized = true;
 		std::cout << "oidnInitialized: " << (oidnInitialized ? "true" : "false") << std::endl;
+
+		film = new Film();
+		if (oidnInitialized == true)
+			film->init((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, new MitchellFilter(),&colorBuf,&outputBuf);
+		else
+			film->init((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, new MitchellFilter());
 		clear();
 	}
 	void clear()
@@ -331,6 +336,66 @@ public:
 		}
 		return Colour(0.0f, 0.0f, 0.0f);
 	}
+
+	void connectToCamera(Vec3 p, Vec3 n, Colour col)
+	{
+		float pixelX, pixelY;
+		bool inFrustum = scene->camera.projectOntoCamera(p, pixelX, pixelY);
+		if (!inFrustum) return;
+
+		Vec3 cameraOrigin = scene->camera.origin;
+		Vec3 viewDir = scene->camera.viewDirection;
+		float toCameraLength = (cameraOrigin - p).length();
+		Vec3 toCamera = (cameraOrigin - p).normalize(); 
+		float cosTheta = Dot(toCamera, -viewDir);      
+		if (cosTheta <= 0) return; 
+
+		// Sensor Importance parameter We
+		float We = 1.0f / (scene->camera.Afilm * pow(cosTheta, 4));
+
+		bool visible = scene->visible(p, cameraOrigin + toCamera * EPSILON);
+		if(!visible) return;
+
+		float cosNormal = Dot(toCamera, n);
+		if (cosNormal <= 0) return;
+		float geometryTerm = cosNormal / (toCameraLength * toCameraLength);
+
+		Colour finalContribution = col * We * geometryTerm;
+		film->splat(pixelX, pixelY, finalContribution);
+	}
+
+	Colour lightTracePath(Ray& r, Colour& pathThroughput, Colour Le, Sampler* sampler)
+	{
+		
+		
+		return Colour(0.0f, 0.0f, 0.0f);
+	}
+
+	void lightTrace(Sampler* sampler)
+	{
+		// Create a ray starting at p in direction wi
+		// create ray
+		float pdfLight = 0.0f;
+		Light* sampledLight = scene->sampleLight(sampler, pdfLight);
+		
+		float pdfPosition = 0.0f;
+		Vec3 lightPos = sampledLight->samplePositionFromLight(sampler, pdfPosition);
+
+		float pdfDirection = 0.0f;
+		Vec3 lightDir = sampledLight->sampleDirectionFromLight(sampler, pdfDirection);
+
+		Vec3 normalLight = sampledLight->normal(ShadingData{}, lightDir);
+
+		Colour Le = sampledLight->evaluate(-lightDir);
+		Colour pathThroughput = Le / (pdfPosition);
+		connectToCamera(lightPos, normalLight, Le);
+
+		Ray lightRay;
+		lightRay.init(lightPos + lightDir * EPSILON, lightDir);
+
+		lightTracePath(lightRay, pathThroughput, Le, sampler);
+	}
+
 	void render()
 	{
 		film->incrementSPP();
@@ -390,10 +455,10 @@ public:
 							normalData[bufIndex] = normal_col.r;
 							normalData[bufIndex + 1] = normal_col.g;
 							normalData[bufIndex + 2] = normal_col.b;
-							float* colorData = (float*)colorBuf.getData();
+							/*float* colorData = (float*)colorBuf.getData();
 							colorData[bufIndex] += col.r;
 							colorData[bufIndex + 1] += col.g;
-							colorData[bufIndex + 2] += col.b;
+							colorData[bufIndex + 2] += col.b;*/
 						}
 					}
 				}
@@ -447,9 +512,10 @@ public:
 					colorData[bufIndex + 2] += film->film[pixelIndex].b;
 				}
 			}*/
+			
 			oidnFilter.execute();
 			//float* outputData = (float*)albedoBuf.getData();
-			float* outputData = (float*)outputBuf.getData();
+			//float* outputData = (float*)outputBuf.getData();
 
 			auto toByte = [](float val) {
 				float v = val * 255.0f;
@@ -461,49 +527,53 @@ public:
 			{
 				for (unsigned int x = 0; x < film->width; x++)
 				{
-					int index = (y * film->width + x) * 3;
-					float invSPP = 1.0f / (float)film->SPP;
-					float r = outputData[index] * invSPP;
-					float g = outputData[index + 1] * invSPP;
-					float b = outputData[index + 2] * invSPP;
-					// tonemap 
-					// L_exposed = L_in * 2^exposure
-					float expScale = std::pow(2.0f, 1.0f);
-					r *= expScale;
-					g *= expScale;
-					b *= expScale;
+					//int index = (y * film->width + x) * 3;
+					//float invSPP = 1.0f / (float)film->SPP;
+					//float r = outputData[index] * invSPP;
+					//float g = outputData[index + 1] * invSPP;
+					//float b = outputData[index + 2] * invSPP;
+					//// tonemap 
+					//// L_exposed = L_in * 2^exposure
+					//float expScale = std::pow(2.0f, 1.0f);
+					//r *= expScale;
+					//g *= expScale;
+					//b *= expScale;
 
-					// Apply filmic tonemapping curve
-					r = film->filmicFunc(r);
-					g = film->filmicFunc(g);
-					b = film->filmicFunc(b);
-					const float W = 11.2f;
-					float denom = 1.0f / film->filmicFunc(W);
-					r = r * denom;
-					g = g * denom;
-					b = b * denom;
+					//// Apply filmic tonemapping curve
+					//r = film->filmicFunc(r);
+					//g = film->filmicFunc(g);
+					//b = film->filmicFunc(b);
+					//const float W = 11.2f;
+					//float denom = 1.0f / film->filmicFunc(W);
+					//r = r * denom;
+					//g = g * denom;
+					//b = b * denom;
 
-					//c.r = std::max(0.0f, std::min(1.0f, c.r));
-					//c.g = std::max(0.0f, std::min(1.0f, c.g));
-					//c.b = std::max(0.0f, std::min(1.0f, c.b));
+					////c.r = std::max(0.0f, std::min(1.0f, c.r));
+					////c.g = std::max(0.0f, std::min(1.0f, c.g));
+					////c.b = std::max(0.0f, std::min(1.0f, c.b));
 
-					
+					//
 
-					////L_exposed = L_in * 2^exposure
-					//float expScale = pow(2.0f, exposure);
-					//rr = rr * expScale;
-					//gg = gg * expScale;
-					//bb = bb * expScale;
+					//////L_exposed = L_in * 2^exposure
+					////float expScale = pow(2.0f, exposure);
+					////rr = rr * expScale;
+					////gg = gg * expScale;
+					////bb = bb * expScale;
 
-					//// L_out = (L_exposed)^(1/2.2)
-					float invGamma = 1.0f / 2.2f;
-					r = pow(std::max(0.0f, r), invGamma);
-					g = pow(std::max(0.0f, g), invGamma);
-					b = pow(std::max(0.0f, b), invGamma);
-					unsigned char charR = toByte(r);
-					unsigned char charG = toByte(g);
-					unsigned char charB = toByte(b);
-					canvas->draw(x, y, charR, charG, charB);
+					////// L_out = (L_exposed)^(1/2.2)
+					//float invGamma = 1.0f / 2.2f;
+					//r = pow(std::max(0.0f, r), invGamma);
+					//g = pow(std::max(0.0f, g), invGamma);
+					//b = pow(std::max(0.0f, b), invGamma);
+					//unsigned char charR = toByte(r);
+					//unsigned char charG = toByte(g);
+					//unsigned char charB = toByte(b);
+					unsigned char r;
+					unsigned char g;
+					unsigned char b;
+					film->tonemap(x, y, r, g, b);
+					canvas->draw(x, y, r, g, b);
 				}
 			}
 		}
