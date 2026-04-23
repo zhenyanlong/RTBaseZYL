@@ -110,7 +110,7 @@ public:
 		if (oidnDevice.getError(errorMessage) != oidn::Error::None)
 			std::cout << "OIDN Init Error: " << errorMessage << std::endl;
 		else
-			oidnInitialized = true;
+			oidnInitialized = false;
 		std::cout << "oidnInitialized: " << (oidnInitialized ? "true" : "false") << std::endl;
 
 		film = new Film();
@@ -398,11 +398,13 @@ public:
 			float down = fabs(Dot(shadingData.wo, shadingData.gNormal)) * fabs(Dot(world_wi, shadingData.sNormal));
 			nonsymmetricFactor = up / down;
 		}
-		Colour col = pathThroughput * shadingData.bsdf->evaluate(shadingData, world_wi) * Le;
+		//float N = (float)film->width * (float)film->height;
+		Vec3 toCamera = (scene->camera.origin - shadingData.x).normalize();
+		Colour col = pathThroughput * shadingData.bsdf->evaluate(shadingData, toCamera);
 		connectToCamera(shadingData.x, shadingData.sNormal, col * nonsymmetricFactor);
 		
 		float cosTheta = Dot(world_wi, shadingData.sNormal);
-		pathThroughput = pathThroughput * cosTheta * nonsymmetricFactor / pdf;
+		pathThroughput = pathThroughput * f * cosTheta * nonsymmetricFactor / pdf;
 
 		Ray nextRay;
 		nextRay.init(shadingData.x + world_wi * EPSILON, world_wi);
@@ -426,9 +428,13 @@ public:
 
 		Vec3 normalLight = sampledLight->normal(ShadingData{}, lightDir);
 
+		
 		Colour Le = sampledLight->evaluate(-lightDir);
-		Colour pathThroughput = Le / (pdfPosition);
-		connectToCamera(lightPos, normalLight, Le);
+		float cosLight = std::max(0.0f, Dot(normalLight, lightDir));
+		Colour pathThroughput = Le * cosLight / (pdfPosition * pdfLight * pdfDirection);
+		connectToCamera(lightPos, normalLight, pathThroughput);
+
+		
 
 		Ray lightRay;
 		lightRay.init(lightPos + lightDir * EPSILON, lightDir);
@@ -457,53 +463,55 @@ public:
 				{
 					for (unsigned int x = 0; x < tile.GetTileWidth(); x++)
 					{
-						int globalX, globalY;
-						tile.ConvertLocalPosToGlobal(x, y, globalX, globalY);
-						/*float r1 = samplers[threadId].next();
-						float r2 = samplers[threadId].next();
-						r1 = (r1 >= 1.0f) ? 1.0f - 1e4f : r1;
-						r2 = (r2 >= 1.0f) ? 1.0f - 1e4f : r2;*/
-						float px = globalX + samplers[threadId].next();
-						float py = globalY + samplers[threadId].next();
-						float normal_px = globalX + 0.5f;
-						float normal_py = globalY + 0.5f;
-						//float px = globalX + 0.5f;
-						//float py = globalY + 0.5f;
-						Ray ray = scene->camera.generateRay(px, py);
-						Ray uniform_ray = scene->camera.generateRay(normal_px, normal_py);
+						//int globalX, globalY;
+						//tile.ConvertLocalPosToGlobal(x, y, globalX, globalY);
+						///*float r1 = samplers[threadId].next();
+						//float r2 = samplers[threadId].next();
+						//r1 = (r1 >= 1.0f) ? 1.0f - 1e4f : r1;
+						//r2 = (r2 >= 1.0f) ? 1.0f - 1e4f : r2;*/
+						//float px = globalX + samplers[threadId].next();
+						//float py = globalY + samplers[threadId].next();
+						//float normal_px = globalX + 0.5f;
+						//float normal_py = globalY + 0.5f;
+						////float px = globalX + 0.5f;
+						////float py = globalY + 0.5f;
+						//Ray ray = scene->camera.generateRay(px, py);
+						//Ray uniform_ray = scene->camera.generateRay(normal_px, normal_py);
 
-						Colour albedo_col = albedo(ray);
-						Colour normal_col = viewNormals(ray);
-						
-						Colour pathThroughput = Colour(1.0f, 1.0f, 1.0f);
-						Colour col = pathTrace(ray, pathThroughput, 0, &samplers[threadId]);
-						//Colour col = direct(ray, &samplers[threadId]);
-						//Colour col = albedo(ray);
-						film->splat(px, py, col);
-						/*unsigned char r;
-						unsigned char g;
-						unsigned char b;
-						film->tonemap(globalX, globalY, r, g, b);*/
-						//canvas->draw(globalX, globalY, r, g, b);
-						// fill color buffer
-						if (oidnInitialized) {
-							int pixelIndex = globalY * film->width + globalX;
-							int bufIndex = pixelIndex * 3;
-							// albedo buffer
-							float* albedoData = (float*)albedoBuf.getData();
-							albedoData[bufIndex] = albedo_col.r;
-							albedoData[bufIndex + 1] = albedo_col.g;
-							albedoData[bufIndex + 2] = albedo_col.b;
-							// normal buffer
-							float* normalData = (float*)normalBuf.getData();
-							normalData[bufIndex] = normal_col.r;
-							normalData[bufIndex + 1] = normal_col.g;
-							normalData[bufIndex + 2] = normal_col.b;
-							/*float* colorData = (float*)colorBuf.getData();
-							colorData[bufIndex] += col.r;
-							colorData[bufIndex + 1] += col.g;
-							colorData[bufIndex + 2] += col.b;*/
-						}
+						//Colour albedo_col = albedo(ray);
+						//Colour normal_col = viewNormals(ray);
+						//
+						//Colour pathThroughput = Colour(1.0f, 1.0f, 1.0f);
+						//Colour col = pathTrace(ray, pathThroughput, 0, &samplers[threadId]);
+						////Colour col = direct(ray, &samplers[threadId]);
+						////Colour col = albedo(ray);
+						//film->splat(px, py, col);
+						///*unsigned char r;
+						//unsigned char g;
+						//unsigned char b;
+						//film->tonemap(globalX, globalY, r, g, b);*/
+						////canvas->draw(globalX, globalY, r, g, b);
+						//// fill color buffer
+						//if (oidnInitialized) {
+						//	int pixelIndex = globalY * film->width + globalX;
+						//	int bufIndex = pixelIndex * 3;
+						//	// albedo buffer
+						//	float* albedoData = (float*)albedoBuf.getData();
+						//	albedoData[bufIndex] = albedo_col.r;
+						//	albedoData[bufIndex + 1] = albedo_col.g;
+						//	albedoData[bufIndex + 2] = albedo_col.b;
+						//	// normal buffer
+						//	float* normalData = (float*)normalBuf.getData();
+						//	normalData[bufIndex] = normal_col.r;
+						//	normalData[bufIndex + 1] = normal_col.g;
+						//	normalData[bufIndex + 2] = normal_col.b;
+						//	/*float* colorData = (float*)colorBuf.getData();
+						//	colorData[bufIndex] += col.r;
+						//	colorData[bufIndex + 1] += col.g;
+						//	colorData[bufIndex + 2] += col.b;*/
+						//}
+
+						lightTrace(&samplers[threadId]);
 					}
 				}
 			}
