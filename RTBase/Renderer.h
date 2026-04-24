@@ -57,6 +57,12 @@ public:
 	}
 };
 
+struct VPL
+{
+	ShadingData shadingData;
+	Colour Le;
+};
+
 class RayTracer
 {
 public:
@@ -75,6 +81,8 @@ public:
 	oidn::BufferRef outputBuf;
 	oidn::FilterRef oidnFilter;
 	bool oidnInitialized = false;
+
+	std::vector<VPL> vpls;
 
 	void init(Scene* _scene, GamesEngineeringBase::Window* _canvas)
 	{
@@ -444,6 +452,116 @@ public:
 		lightTracePath(lightRay, pathThroughput, Le, sampler);
 	}
 
+	void VPLsPath(Ray& r, Colour& pathThroughput, int depth, Sampler* sampler)
+	{
+		float rrProb = 0.7f;
+		if (depth >=5)
+		{
+			return;
+		}
+		else if (depth > 2)
+		{
+			if (sampler->next() > rrProb)
+			{
+				return;
+			}
+			pathThroughput = pathThroughput / rrProb;
+		}
+		
+
+		IntersectionData intersection = scene->traverse(r);
+		if (intersection.t >= FLT_MAX)
+		{
+			return;
+		}
+		ShadingData shadingData = scene->calculateShadingData(intersection, r);
+		
+		vpls.emplace_back(VPL{ shadingData, pathThroughput });
+		
+		// next path
+		Colour f;
+		float pdf;
+		Vec3 world_wi = shadingData.bsdf->sample(shadingData, sampler, f, pdf);
+		if (pdf <= 1e-8f)
+			return;
+		float cosTheta = Dot(world_wi, shadingData.sNormal);
+		pathThroughput = pathThroughput * f * cosTheta / pdf;
+
+		Ray startRay;
+		startRay.init(shadingData.x + world_wi * EPSILON, world_wi);
+		VPLsPath(startRay, pathThroughput, depth + 1, sampler);
+	}
+	// First pass
+	void generateVPLs(int numPaths, Sampler* sampler)
+	{
+		vpls.clear();
+		for (int i = 0; i < numPaths; i++)
+		{
+			float pdfLight;
+			Light* sampledLight = scene->sampleLight(sampler, pdfLight);
+			float pdfPos;
+			Vec3 lightPos = sampledLight->samplePositionFromLight(sampler, pdfPos);
+			float pdfDir;
+			Vec3 lightDir = sampledLight->sampleDirectionFromLight(sampler, pdfDir);
+
+			Vec3 normalLight = sampledLight->normal(ShadingData{}, lightDir);
+			float cosTheta = std::max(0.0f, Dot(normalLight, lightDir));
+			Colour Le = sampledLight->evaluate(-lightDir);
+
+			Colour pathThroughput = Le * cosTheta / (pdfPos * pdfLight * pdfDir);
+
+			Ray StartRay;
+			StartRay.init(lightPos + lightDir * EPSILON, lightDir);
+
+			VPLsPath(StartRay, pathThroughput, 0, sampler);
+		}
+		
+	}
+	// second pass
+	Colour InstantRadiosity(Ray ray, std::vector<VPL>& vpls, Sampler* sampler)
+	{
+		IntersectionData intersection = scene->traverse(ray);
+		if (intersection.t >= FLT_MAX)
+		{
+			return scene->background->evaluate(ray.dir);
+		}
+		ShadingData shadingData = scene->calculateShadingData(intersection, ray);
+
+		if (shadingData.bsdf->isLight())
+		{
+			return shadingData.bsdf->emit(shadingData, shadingData.wo);
+		}
+		Colour L_direct(0.0f, 0.0f, 0.0f);
+		
+		if (!shadingData.bsdf->isPureSpecular())
+		{
+			// direct light
+			L_direct = L_direct + computeDirect(shadingData, sampler);
+			// traverse VPLs
+			for (VPL& vpl : vpls)
+			{
+				Vec3 toVPL = vpl.shadingData.x - shadingData.x;
+				float dist = (toVPL.length()>EPSILON) ? toVPL.length() : EPSILON;
+				Vec3 wi = toVPL / dist;
+
+				// geometry term
+				float cosThetaX = std::max(0.0f, Dot(wi, shadingData.sNormal));
+				float cosThetaVPL = std::max(0.0f, Dot(-wi, vpl.shadingData.sNormal));
+				float g_term = (cosThetaX * cosThetaVPL) / (dist * dist);
+				bool visible = scene->visible(shadingData.x + wi * EPSILON, vpl.shadingData.x);
+				if (!visible) continue;
+				Colour f = shadingData.bsdf->evaluate(shadingData, wi);
+				Colour vplf = vpl.shadingData.bsdf->evaluate(vpl.shadingData, -wi);
+				L_direct = L_direct + f * vplf * g_term;
+			}
+		}
+		else
+		{
+			
+		}
+		return L_direct;
+	}
+
 	void render()
 	{
 		film->incrementSPP();
@@ -527,33 +645,36 @@ public:
 			threads[i] = nullptr;
 		}*/
 		// single-threaded rendering
-		for (unsigned int y = 0; y < film->height; y++)
-		{
-			for (unsigned int x = 0; x < film->width; x++)
-			{
-				//float px = x + samplers[0].next();
-				//float py = y + samplers[0].next();
-				//Ray ray = scene->camera.generateRay(px, py);
-				//
-				////Colour col = viewNormals(ray);
-				////Colour col = albedo(ray);
-				//Colour pathThroughput = Colour(1.0f, 1.0f, 1.0f);
-				//Colour col = pathTrace(ray, pathThroughput, 0, &samplers[0]);
-				//film->splat(px, py, col);
-				///*unsigned char r = (unsigned char)(col.r * 255);
-				//unsigned char g = (unsigned char)(col.g * 255);
-				//unsigned char b = (unsigned char)(col.b * 255);*/
-				////film->splat(px, py, col);
-				//unsigned char r;
-				//unsigned char g;
-				//unsigned char b;
-				//film->tonemap(x, y, r, g, b);
+		//generateVPLs(10, &samplers[0]);
+		//for (unsigned int y = 0; y < film->height; y++)
+		//{
+		//	for (unsigned int x = 0; x < film->width; x++)
+		//	{
+		//		float px = x + samplers[0].next();
+		//		float py = y + samplers[0].next();
+		//		Ray ray = scene->camera.generateRay(px, py);
+		//		
+		//		Colour col = InstantRadiosity(ray, vpls, &samplers[0]);
+		//		////Colour col = viewNormals(ray);
+		//		////Colour col = albedo(ray);
+		//		//Colour pathThroughput = Colour(1.0f, 1.0f, 1.0f);
+		//		//Colour col = pathTrace(ray, pathThroughput, 0, &samplers[0]);
+		//		//film->splat(px, py, col);
+		//		///*unsigned char r = (unsigned char)(col.r * 255);
+		//		//unsigned char g = (unsigned char)(col.g * 255);
+		//		//unsigned char b = (unsigned char)(col.b * 255);*/
+		//		film->splat(px, py, col);
+		//		//unsigned char r;
+		//		//unsigned char g;
+		//		//unsigned char b;
+		//		//film->tonemap(x, y, r, g, b);
 
-				//canvas->draw(x, y, r, g, b);
+		//		//canvas->draw(x, y, r, g, b);
 
-				lightTrace(&samplers[0]);
-			}
-		}
+		//		//lightTrace(&samplers[0]);
+
+		//	}
+		//}
 		// OIDN Denoising
 		if (oidnInitialized) {
 			/*float* colorData = (float*)colorBuf.getData();
