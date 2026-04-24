@@ -7,6 +7,7 @@
 #define __STDC_LIB_EXT1__
 #include "stb_image_write.h"
 #include <OpenImageDenoise/oidn.hpp>
+#include <mutex>
 
 // Stop warnings about buffer overruns if size is zero. Size should never be zero and if it is the code handles it.
 #pragma warning( disable : 6386)
@@ -236,6 +237,8 @@ public:
 	ImageFilter* filter;
 
 	bool oidnInitialized = false;
+
+	std::mutex splatMutex;
 	void splat(const float x, const float y, const Colour& L)
 	{
 		// Code to splat a smaple with colour L into the image plane using an ImageFilter
@@ -275,6 +278,7 @@ public:
 				}
 			}
 			if (total == 0) return;
+			//std::lock_guard<std::mutex> lock(splatMutex);
 			for (int i = 0; i < used; i++) {
 				film[indices[i]] = film[indices[i]] + (L * filterWeights[i] / total);
 			}
