@@ -351,7 +351,7 @@ public:
 		// Replace this with Conductor evaluation code
 		Vec3 local_wo = shadingData.frame.toLocal(shadingData.wo);
 		Vec3 local_wi = shadingData.frame.toLocal(wi);
-		 if (local_wo.z <= EPSILON || local_wi.z <= EPSILON)
+		 if (local_wo.z <= 0.0f || local_wi.z <= 0.0f)
 		 {
 			 return Colour(0.0f, 0.0f, 0.0f);
 		 }
