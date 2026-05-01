@@ -110,7 +110,7 @@ public:
 		if (oidnDevice.getError(errorMessage) != oidn::Error::None)
 			std::cout << "OIDN Init Error: " << errorMessage << std::endl;
 		else
-			oidnInitialized = true;
+			oidnInitialized = false;
 		std::cout << "oidnInitialized: " << (oidnInitialized ? "true" : "false") << std::endl;
 
 		film = new Film();
@@ -160,7 +160,10 @@ public:
 			
 			// evaluate BSDF
 			Colour c = shadingData.bsdf->evaluate(shadingData, xtoLight.normalize());
-
+			//MIS
+			float pdfLight = sampledLight->PDF(shadingData, xtoLight.normalize());
+			float pdfBSDF = shadingData.bsdf->PDF(shadingData, xtoLight.normalize());
+			float misWeight = (pdfLight * pdfLight) / (pdfLight * pdfLight + pdfBSDF * pdfBSDF);
 			return c * g_term* (float)visible * Le / (pdf * pmf);
 		}
 		else
@@ -455,7 +458,7 @@ public:
 				
 				for (unsigned int y = 0; y < tile.GetTileHeight(); y++)
 				{
-					for (unsigned int x = 0; x < tile.GetTileWidth(); x++)
+					for (unsigned int x = 0; x < tile.GetTileWidth(); x ++)
 					{
 						int globalX, globalY;
 						tile.ConvertLocalPosToGlobal(x, y, globalX, globalY);
